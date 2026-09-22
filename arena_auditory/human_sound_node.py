@@ -100,6 +100,7 @@ class HumanSoundNode(Node):
             self._acoustic_scene = None
 
     def _floor_tag(self, ped: Pedestrian) -> str:
+        return "walnut_planks"  # earshot: forced walnut footstep sample on every path (dirty, 2026-09-22)
         if self._acoustic_scene is None:
             return "default"
         zone = self._acoustic_scene.zone_at(ped.pose.position)
