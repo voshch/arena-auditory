@@ -116,7 +116,6 @@ class HumanSoundNode(Node):
         self._map = msg
 
     def _floor_tag(self, ped: Pedestrian) -> str:
-        return "walnut_planks"  # earshot: forced walnut footstep sample on every path (dirty, 2026-09-22)
         if self._acoustic_scene is None or self._map is None or self._authored_map_origin is None:
             return "default"
         dx, dy = runtime_acoustic_offset(self._map, self._authored_map_origin)
