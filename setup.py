@@ -7,7 +7,6 @@ package_name = 'arena_auditory'
 
 setup(
     name=package_name,
-    version='0.0.0',
     packages=find_packages(where='.', include=[f'{package_name}*']),
     package_dir={'': '.'},
     data_files=[
@@ -18,10 +17,6 @@ setup(
         (os.path.join('share', package_name, 'launch'), glob('launch/*.launch.py')),
         (os.path.join('share', package_name, 'sounds'), glob('sounds/*.wav')),
     ],
-    install_requires=['setuptools'],
-    extras_require={
-        'test': ['pytest>=7'],
-    },
     zip_safe=True,
     maintainer='voshch',
     maintainer_email='dev@voshch.dev',
