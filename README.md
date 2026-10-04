@@ -1,432 +1,428 @@
 # arena_auditory
 
-The auditory simulator adds robot microphones, propagation, hearing, and local
-playback as its own axis next to the human simulator. `auditory:=none` (the
-default) runs without the auditory nodes; `auditory:=arena` launches this
-package's sidecar from `task_generator/launch/auditory/` and makes the task
-generator bring up the map server it reads. Human footsteps and greetings are
-produced from the human simulator's `arena_peds` topic, whichever backend
-publishes it.
+The auditory simulator adds robot microphone arrays, sound propagation, robot
+hearing and workstation playback as its own axis next to the human simulator.
+`auditory:=none` (the default) runs without the auditory nodes. `auditory:=arena`
+launches this stack per env and makes the task generator bring up the map
+server it reads. Pedestrian footsteps and speech are produced from the human
+simulator's `arena_peds` topic, whichever backend publishes it.
 
-## Features
+This repository is the optional auditory feature, a submodule of Arena. Install
+it with `arena feature auditory install`, which checks it out, installs its
+system dependencies through rosdep (PortAudio for sounddevice), syncs its Python
+dependencies (torch, pyroomacoustics, librosa, sounddevice, polars, pyarrow)
+and rebuilds.
 
-- Human sound events: moving pedestrians emit `footstep`; nearby facing
-  pedestrians emit `greeting`.
-- Sound-to-material matching: footstep events include floor/material semantic
-  tags so playback can choose a matching sample, for example default vs
-  walnut-plank footsteps.
-- Sound propagation: `sound_propagation_node` converts `SoundEvent` messages
-  into `HeardSoundEvent` messages using listener positions, distance loss,
-  wall/material attenuation, optional pyroomacoustics RIRs, and cached
-  multi-portal coupling across doors and shared open boundaries.
-- TF microphones: named microphones can attach to any TF frame. Every
-  microphone is an independent propagation listener.
-- Robot hearing: in stereo mode, `robot_hearing_node` consumes the center
-  listener. In four-mic mode, `microphone_array_node` first fuses the matching
-  FL/FR/RL/RR results and `robot_hearing_node` consumes only that array-derived
-  event. It republishes per-robot heard events and RViz text markers.
-- Human audio playback: `human_sound_playback` plays human sound assets from
-  `config/acoustic_assets.yaml`.
-- Environment audio: worlds (or `auditory.static_sounds`) declare standalone
-  `sound` semantic entities such as a looping radio or an alarm. Several
-  sounds sharing one `sound_on` regime move together as one logical alarm
-  while each keeps its own propagation route, delay, attenuation, and RIR.
-- Robot motor sound: `robot_sound_node` can publish robot motor `SoundEvent`
-  messages from robot odometry. In the default `auditory.motor:=procedural`,
-  Jackals instead publish continuous signed left/right drivetrain state;
-  other robot models retain the WAV fallback. Set `auditory.motor:=wav` to
-  use WAV playback for Jackals as well. The node also renders and plays robot
-  audio. Its live `enable_motor_playback` parameter mutes only workstation
-  motor audio while motor emission and ROS propagation continue.
+## Layout
 
-Expected nodes when enabled include:
-
-- `sound_propagation_node`
-- `robot_sound_node`
-- `robot_hearing_node`
-- `human_sound_playback`
-- `environment_sound_playback`
-- `microphone_array_node` (with `microphone_mode:=four_mic`)
-- `sound_propagation_visualizer` (enabled with `auditory.viz:=true`)
-
-## Main Topics
-
-- `human_sound_events`: emitted `SoundEvent` stream.
-- `heard_sound_events`: propagated `HeardSoundEvent` stream.
-- `four_mic_heard_sound_events`: one array-fused event per finite sound in
-  four-mic mode; this is the input to `robot_hearing_node` in that mode.
-- `continuous_audio_sources`: persistent procedural source state.
-- `continuous_heard_sounds`: listener-specific propagated procedural state.
-- `state/semantics`: latched `SemanticSnapshot` carrying every sound's live
-  `sounding`/`volume_db` state, alongside every other semantic kind.
-- `microphone_listeners`: transient-local JSON registry of active microphone
-  listener IDs.
-- `microphone_markers`: persistent RViz cones and listener ID labels.
-- `state/robots`: robot fleet metadata used by propagation, robot sound, and
-  robot hearing nodes.
-- `<robot_name>/heard_sound`: per-robot heard event output.
-- `pedestrian_markers/extra`: pedestrian footstep/greeting cones and other
-  transient pedestrian overlays.
-- `<robot_name>/motor_sound_markers`: robot-local motor arcs.
-- `<robot_name>/heard_sound_marker`: RViz text marker for sounds heard by the
-  robot.
-- `sound_propagation_markers`: RViz source/portal/listener paths.
-- `environment_audio_source_markers`: fixed radio and alarm emitters.
-
-## Four-microphone Jackal array
-
-Set `microphone_mode:=four_mic` to replace the legacy 0.20 m side pair with
-four independent propagation listeners and start the synchronized raw PCM,
-robot-hearing, headphone and TDoA outputs. `microphone_mode:=stereo` preserves
-the old behavior.
-
-The implementation is part of the existing ROS 2 auditory stack, not a sensor
-plugin tied to a physics simulator. `sound_propagation_node` remains the source
-of listener-specific distance, delay, attenuation, occupancy/material
-occlusion, reflection metadata and pyroomacoustics portal routing.
-`microphone_array_node` renders its four results on one 16 kHz sample clock.
-Finite sound events use reliable volatile QoS: current subscribers receive
-each event without replaying stale clips to nodes that join later.
-
-The renderer is driven by `/clock`, not by an rcl timer: every clock message
-renders the 20 ms blocks it has covered, so sample zero stays anchored to the
-sim time of the first block and block stamps never drift behind the clock.
-When a clock message finds the render more than `max_catchup_blocks` (10)
-behind, the surplus blocks are skipped rather than rendered late: audio shows a
-gap, never a growing delay. Skips are counted in the diagnostics and warned
-once per lapse. Under `arena lockstep`, the node registers `raw_array` as a
-hard channel with one block per window, so the scheduler waits for every block
-instead and the skip path never fires. Without sim time (standalone tests) the
-renderer falls back to a steady-clock timer. Detection (`hearing/<robot>`),
-belief (`belief/<robot>`) and the speed mask (`policy/<robot>`) are hard
-channels too, so under `lockstep:=true` a footstep at sim time t is in the
-mask by a fixed pipeline depth on any machine.
-
-### Geometry and spacing
-
-The Jackal collision chassis in
-`arena_robots/arena_robots/robots/jackal/urdf/jackal.urdf.xacro` is 0.420 m
-long, 0.310 m wide and 0.184 m high. Each microphone is inset 0.020 m from its
-two nearest horizontal edges and mounted at z=0.220 m:
-
-| Channel | Frame | Position in `base_link` (m) | Inlet yaw |
-|---:|---|---:|---:|
-| 0 | `mic_front_left` | `(0.190, 0.135, 0.220)` | `+45 deg` |
-| 1 | `mic_front_right` | `(0.190, -0.135, 0.220)` | `-45 deg` |
-| 2 | `mic_rear_left` | `(-0.190, 0.135, 0.220)` | `+135 deg` |
-| 3 | `mic_rear_right` | `(-0.190, -0.135, 0.220)` | `-135 deg` |
-
-Yes, the two principal spacings are deliberately different:
-
-- front-to-back spacing on either side is `0.190 - (-0.190) = 0.380 m`;
-- left-to-right spacing at either end is `0.135 - (-0.135) = 0.270 m`;
-- diagonal spacing is about `0.466 m`.
-
-This follows the rectangular chassis instead of forcing the receivers into a
-smaller square. A square that remained on the chassis would have to reduce the
-front-to-back spacing from 0.380 m to 0.270 m, discarding 29% of the available
-longitudinal aperture. With speed of sound 343 m/s, the current far-field
-maximum path delays are approximately 1,108 us (17.7 samples at 16 kHz)
-front-to-back and 787 us (12.6 samples) left-to-right. The larger longitudinal
-baseline therefore gives more observable timing information for front/back
-classification. TDoA algorithms use the exact coordinates, so equal baselines
-are not required. The tradeoff is greater high-frequency spatial aliasing;
-the design favors broadband, relatively low-frequency events such as footsteps
-and retains the configurable geometry for comparison experiments.
-
-```text
-                         +X FRONT
-
-              FL  ↖                 ↗  FR
-                    +---------------+
-                    |               |
-              +Y    |    JACKAL     |    -Y
-                    |               |
-                    +---------------+
-              RL  ↙                 ↘  RR
-
-                         -X REAR
+```
+arena_auditory/                 this repository
+|-- arena_auditory/             ament_python package
+|   |-- arena_auditory/         python package
+|   |   |-- api.py              the names task_generator imports
+|   |   |-- shared.py           SourceSpec, ListenerId, ArraySpec, RobotBinding, level helpers
+|   |   |-- constants.py        every topic and service name, ArrayStream
+|   |   |-- params.py           every node parameter and its default
+|   |   |-- world.py rooms.py materials.py   acoustic world, rooms, materials
+|   |   |-- world_tracker.py    world and map subscriptions, realizes the world in the map frame
+|   |   |-- assets.py           sound library: kinds, assets, variants, decoding
+|   |   |-- propagation/        backends, portal routing, RIR cache, impulses
+|   |   |-- sources/            source models (wav, wav_loop, drivetrain), pedestrian events
+|   |   |-- render/             block renderer, DSP, monitor, workstation output
+|   |   |-- hearing/            robot hearing: bus, belief, policy, srp and seld front-ends
+|   |   |-- dataset/            acoustics recording export and capture wait
+|   |   `-- *_node.py, offline_render.py, acoustic_audit.py, microphone_diagnostic.py
+|   |-- config/                 sounds.yaml, arrays/, acoustic_materials.yaml, weights.yaml, hearing/nav2_overlay.yaml
+|   |-- launch/                 arena_auditory.launch.py, hearing.launch.py
+|   |-- sounds/Common/Sound/    bundled sound assets
+|   `-- tools/                  source-only scripts, not installed: scenario generation, dataset recording, belief replay
+|-- arena_auditory_msgs/        messages and services
+`-- arena_auditory_viz/         RViz panel and tools
 ```
 
-The frames are fixed children of `base_link`, so the normal robot TF chain
-moves and rotates them rigidly. The arrows represent outward-facing inlet
-normals. Propagation is currently omnidirectional because no calibrated
-XVF3800 polar response exists in the acoustic API; orientation is retained in
-the model, RViz and stream metadata for future directivity models.
+## Nodes
 
-Defaults live in `config/jackal_four_mic.yaml` and are configurable
-through `mic_array_width`, `mic_array_length`, `mic_height` and
-`mic_corner_inset`. The same YAML is loaded by propagation and rendering so
-their geometry cannot drift in file-based experiments.
+`arena_auditory.launch.py` starts these nodes below the task generator node of
+the env (`/arena/env_0/task_generator_node/<node>` for env 0):
 
-The receiver uses the Seeed reSpeaker XMOS XVF3800 as a technology reference:
-four raw PDM MEMS-like channels, -26 dBFS nominal sensitivity, 64 dBA SNR,
-120 dB SPL overload and 16 kHz maximum reference-board sampling rate. See the
-[XVF3800 data sheet](https://files.seeedstudio.com/Bazaar/product_pdf/114993700.pdf)
-and [XVF3800 guide](https://wiki.seeedstudio.com/respeaker_xvf3800_introduction/).
-The physical board is circular; Arena retains the synchronized raw-channel
-concept but uses Jackal corner positions. It does not apply the hardware's
-onboard AEC, AGC, beamforming, noise suppression or phase correction.
+| Node | Executable | Role |
+|---|---|---|
+| `sound_propagation_node` | `sound_propagation_node` | Turns `SoundEvent` and `ContinuousAudioSourceState` into one `HeardSoundEvent` or `ContinuousHeardSoundState` per listener. Owns every room impulse response and publishes it on `acoustic/impulses`. Serves `runtime/spawn_microphone` and `runtime/remove_microphone`. |
+| `human_emitter` | `human_emitter` | Emits `footstep` and `speech` sound events from `arena_peds`. |
+| `robot_emitter` | `robot_emitter` | Publishes the continuous noise sources of every robot, the motor driven by its odometry. |
+| `array_renderer` | `renderer` (`render.role: array`) | Renders the microphone array (`array.spec`) of every fleet robot to PCM, the stems, the monitor and the diagnostics. Plays one robot's monitor on the workstation while `output.enabled`. Runs with `OMP_NUM_THREADS=1`. |
+| `listener_renderer` | `renderer` (`render.role: listener`) | Renders the single microphone `listener.id` to the workstation. Not launched with `auditory.output.device:=none`. |
+| `robot_hearing_node` | `robot_hearing_node` | The simulator bus: republishes what each robot's `robot:<r>` listener hears as `<r>/heard_sound`, `AuditoryDetection` on `<r>/hearing/bus/detections` and a text marker. |
+| `sound_propagation_visualizer` | `sound_propagation_visualizer` | Propagation paths, rooms, portals and environment sources in RViz. Launched with `auditory.viz.enabled:=true`. |
 
-### Signal path and topics
+`hearing.launch.py` adds the robot hearing nodes, see [Robot-side hearing](#robot-side-hearing).
 
-```text
-sources -> existing sound_propagation_node -> FL / FR / RL / RR results
-        -> synchronized raw PCM -> mono diagnostic / spatial stereo / GCC-PHAT
-        -> four-channel event fusion -> robot_hearing_node -> jackal/heard_sound
-```
+Further executables:
 
-Each listener result has its own `direct_delay_sec`, `received_volume_db`,
-audibility and occlusion/portal result. Finite events use one source sample and
-one common scheduling anchor, then apply each receiver's delay with
-fractional-sample interpolation. WAV loops share `program_start_time` while
-retaining each receiver's independent delay and level. The renderer never
-duplicates one received channel four times.
-Procedural Jackal drivetrain state is synthesized once at the array's 16 kHz
-rate, then distributed with each microphone's independent propagation gain and
-streaming fractional delay. The RViz motor enable and tuning controls are
-mirrored to this renderer in four-mic mode.
+| Executable | Purpose |
+|---|---|
+| `auditory_offline_render` | Re-renders a recorded `diagnostics/render_inputs` trace (v1 and v2) offline. |
+| `acoustic_world_audit` | Audits acoustic zone coverage and portals of installed worlds, `--plot-room` plots a room impulse response. |
+| `microphone_diagnostic` | Console levels and GCC-PHAT estimates of a `raw_array` topic. |
+| `hearing_setup`, `hearing_audio_replay` | SELDnet weights, wav replay as `AudioFrame`. |
+| `export_acoustics_recording`, `wait_acoustics_capture` | Acoustics dataset pipeline, see [tools/README.md](arena_auditory/tools/README.md). |
 
-The legacy human and environment playback nodes are not launched in four-mic
-mode; the array is the sole workstation output path. `robot_sound_node` remains
-active as the motor-state producer, but its legacy mixer has no local device.
-The independent `robot:jackal` center listener is not propagated in four-mic
-mode. Once all four microphone results for a finite event arrive, the array
-publishes one compatible event using the strongest audible received level, the
-earliest audible arrival, and the mean microphone position as the robot-array
-center. The existing robot-hearing threshold, delay and marker logic then
-publishes `jackal/heard_sound`.
+## Parameters
 
-`task_generator_msgs/AudioFrame` contains timestamp, sample rate, encoding,
-frame count, fixed ordering, microphone frame IDs, positions, inlet yaws and
-interleaved float32 PCM. For a robot named `jackal`, topics end in:
+Every node parameter and its default is declared once in
+[`params.py`](arena_auditory/arena_auditory/params.py), grouped by prefix. A
+node declares only the groups it uses. Names that appear in several nodes
+(`world.*`, `map.*`, `rir.*`, `portal.*`, `motor.*`, `output.*`, `listener.id`,
+`array.spec`) mean the same thing everywhere.
 
-- `jackal/audio/mic_front_left`
-- `jackal/audio/mic_front_right`
-- `jackal/audio/mic_rear_left`
-- `jackal/audio/mic_rear_right`
-- `jackal/audio/raw_array` with order FL, FR, RL, RR
-- `jackal/audio/stem_motor`, the ego-noise stem of the same mix
-- `jackal/audio/stem_pedestrian`, everything in that mix except the ego noise
-- `jackal/audio/hearing/mono`
-- `jackal/audio/hearing/energy`
-- `jackal/audio/headphones/left`
-- `jackal/audio/headphones/right`
-- `jackal/audio/headphones/stereo`
-- `jackal/audio/diagnostics/tdoa`
-- `jackal/audio/diagnostics/render_inputs`
+| Prefix | Read by |
+|---|---|
+| `env.ns`, `world.*`, `map.*`, `debug.map_source`, `rir.*`, `portal.*` | propagation, emitters, visualizer |
+| `propagation.*`, `level3.*`, `pedestrian_listeners.*`, `microphones`, `viewport.height_m` | `sound_propagation_node` |
+| `human.*` | `human_emitter` |
+| `drivetrain.*`, `motor.enabled`, `motor.model` | `robot_emitter` |
+| `render.*`, `array.*`, `monitor.*`, `tdoa.*`, `diagnostics.*`, `output.*`, `motor.*` | renderers, `array.*` and `diagnostics.period_s` also propagation |
+| `bus.*` | `robot_hearing_node` |
+| `viz.*` | `sound_propagation_visualizer` |
+| `hearing.*`, `belief.*`, `map.frame`, `policy.*`, `audio.reliable.enabled`, `seld.*`, `srp.*` | hearing nodes, the front-ends take geometry and MEMS sensitivity from each `AudioFrame` |
 
-`hearing/mono` is a diagnostic signal that selects the highest-RMS raw channel
-per block instead of phase-averaging asynchronous signals. It is not the normal
-headphone presentation. `hearing/energy` carries linear RMS in
-the order FL, FR, RL, RR, hearing, headphone L, headphone R. The canonical
-research observation remains the unchanged four-channel `raw_array`.
+The two renderers share one executable. These defaults depend on `render.role`:
 
-`stem_motor` and `stem_pedestrian` are the two halves of that same mix:
-`AudioFrame`s with the same channel order, stamp and monitor controls as
-`raw_array`, the first carrying only the procedural drivetrain contribution and
-the second everything else. Both are tapped before the output clip while
-`raw_array` is published after it. The pedestrian stem is the pre-clip mix
-minus the drivetrain rather than a second accumulation, so the two stems add
-back to that mix sample for sample. Remixing an episode at a different
-ego-noise attenuation is therefore exact whether or not the block clipped: form
-`stem_pedestrian + 10**(-attenuation_db / 20) * stem_motor` and clip the result
-to the range -1 to 1 the way the renderer does. The older
-`raw_array - stem_motor` route recovers the pedestrian stem only for blocks
-that did not clip, because the clip applies to the sum and not to either stem.
-With more than one drivetrain source audible the mix accumulates them one at a
-time, so the two stems can add back one float32 ulp away from it. The audio
-diagnostics carry a running clipped-sample count throughout: it is how you tell
-whether the published `raw_array` itself was clamped.
+| Parameter | array | listener |
+|---|---|---|
+| `monitor.master_gain_db` | -1.94 | 0.0 |
+| `monitor.rear_gain` | 0.75 | 1.0 |
+| `render.rir.enabled` | false | true |
+| `render.inaudible.enabled` | false | true |
+| `render.min_level_db` | -120.0 | -20.0 |
+| `render.lockstep.enabled` | true | false |
 
-`diagnostics/render_inputs` is a `std_msgs/String` carrying one JSON object per
-rendered block: the block index, the clips starting in that block, and the
-complete live set of WAV and drivetrain voices with their gains, delays and
-tuning. It is the complete input state of the block rather than a delta, so an
-offline renderer can reproduce a recorded episode's audio from the trace alone,
-with no message history and without re-running the simulator. Launch pins
-`OMP_NUM_THREADS=1` on the node so the reduction order does not vary with
-thread count and the offline render matches the live one bit for bit.
-
-Headphone monitoring uses
-`L=(front_gain*FL + rear_gain*RL)/gain_sum` and the corresponding right-side
-expression, with no time alignment. Raw channels keep the -26 dBFS-at-94-dB-SPL
-MEMS calibration. A separate `monitor_gain_db` workstation preamp (36 dB by
-default) makes those physical levels audible without changing `raw_array`, and
-`monitor_limit` bounds headphone peaks. `auditory.playback:=auto` routes the
-stereo result to the selected PortAudio device in addition to publishing it.
-When `PULSE_SERVER` is present, automatic device selection prefers a stereo
-PulseAudio output over an exclusive raw ALSA device.
-
-The PCM renderer runs from a steady wall clock because PortAudio consumes in
-wall time even when the simulation real-time factor changes. Its small queue
-accepts arbitrary PortAudio callback frame sizes, counts underflow/overflow,
-retries a failed device every two seconds, and logs `four-mic audio
-diagnostics` at debug level every five seconds. These diagnostics report
-received/accepted events, active WAV and drivetrain voices, stream/device
-state, queue depth, callback count, peak, rendered/skipped block counts,
-clipped samples and the last PortAudio error. A warning is logged once when
-playback degrades (stream inactive, or new underflows/overflows in the period)
-and an info line once when it recovers, and likewise once when the render falls
-behind `/clock` and once when it catches up. `diagnostics/tdoa` is only computed while
-something subscribes to it.
-
-### Simulator relationship
-
-The microphone and propagation nodes do not call Gazebo APIs. They consume ROS
-interfaces: TF, `state/robots`, the occupancy map and acoustic-world metadata,
-plus finite or continuous sound-source messages. Consequently the array is
-usable with the repository's Gazebo, Isaac and external/dummy workflows when
-those interfaces are present.
-
-Gazebo appears in the concrete commands because it is the repository's default
-full physics backend and can run the bundled Jackal, moving pedestrian and
-S-bend world together. In that example Gazebo supplies robot/world motion and
-the TF/odometry state. It does **not** propagate or render audio; Arena's ROS
-auditory nodes do that. The same four-microphone pipeline can be selected with
-`sim:=isaac`. A dummy backend is useful for message-level tests or externally
-published state, but by itself does not provide the moving physical scenario.
-
-Launch a basic example with either full simulator backend:
+Parameters the RViz panel drives are live, for example:
 
 ```bash
-arena launch \
-  sim:=gazebo world:=map_empty robot:=jackal \
-  human:=arena auditory:=arena auditory.viz:=true \
-  microphone_mode:=four_mic auditory.playback:=auto
+ros2 param set /arena/env_0/task_generator_node/array_renderer array.muted true
+ros2 param set /arena/env_0/task_generator_node/array_renderer monitor.solo front_left
+ros2 param set /arena/env_0/task_generator_node/listener_renderer listener.id microphone:runtime:1
+ros2 param set /arena/env_0/task_generator_node/sound_propagation_node propagation.enabled false
 ```
 
-Replace `sim:=gazebo` with `sim:=isaac` when using the Isaac runtime. Backend
-world and human-simulation support still determines which complete scenario is
-available; it does not change the microphone topic or processing contract.
+## Launch arguments
 
-### Controls, visualization and diagnostics
+`arena launch ... auditory:=arena` passes every `auditory.<param>:=<value>` to
+every stack node as ROS parameter `<param>`, coerced to the type of its default
+in `params.py`. Parameters a node does not declare are ignored. An empty value
+keeps the node default. The declared arguments are:
 
-RViz's **Jackal Four-Mic Hearing** group controls array enable, headphone
-enable, mute, master/front/rear gain, FL/FR/RL/RR solo, all-four monitoring,
-the monitor preamp, microphone markers, TDoA diagnostics and gain/routing
-reset. **Spatial stereo (normal)** maps FL/RL to the left headphone and FR/RR
-to the right. **Mono detection preview** duplicates the highest-energy channel
-into both ears and exists only for diagnostics. `solo_channel=""` is the
-empty-string sentinel for **no solo**, meaning all four channels remain
-selected. Solo never changes the canonical four-channel raw or semantic input.
+| Argument | Node default | Effect |
+|---|---|---|
+| `auditory` | `none` | `arena` starts the stack |
+| `auditory.output.device` | `auto` | PortAudio device, `auto` tries `pulse`, `pipewire`, `default`, then the PortAudio default. `none` starts no listener renderer |
+| `auditory.output.block_size` | `512` | Workstation callback block size. Repeated underflows call for a larger `output.buffer_s` |
+| `auditory.output.motor.enabled`, `auditory.output.ambient.enabled` | `true` | Play motor or environment audio on the workstation |
+| `auditory.viz.enabled` | `false` | Start the visualizer and draw discrete pedestrian listeners |
+| `auditory.propagation.backend` | `pyroomacoustics` | `pyroomacoustics`, `level3` or `legacy` |
+| `auditory.portal.multi_hop.enabled` | `true` | RIRs across multi-hop portal routes |
+| `auditory.rir.max_order` | `3` | Image-source order of every RIR, `1` is the cheap fallback |
+| `auditory.pedestrian_listeners.enabled` | `false` | Pedestrians are listeners and receive stimuli through the human simulator |
+| `auditory.motor.enabled` | `true` | Robots emit drivetrain audio |
+| `auditory.motor.model` | `procedural` | `procedural` (Jackal drivetrain synthesis) or `wav` |
+| `auditory.motor.trim_db` | `0.0` | Live offset on the motor level. The motor asset `level_db` (45 dB at 1 m) is the level of every motor variant, the procedural drivetrain at the spec `v_ref` (1 m/s) |
+| `auditory.listener.id` | empty | Microphone of the listener renderer |
+| `auditory.viewport.height_m` | `1.6` | Height of the viewport down-projection microphone |
+| `auditory.array.spec` | `stereo` | `mono`, `stereo`, `four_mic` or a yaml path. `four_mic` when `robot.hearing` is `srp` or `seld` |
+| `auditory.array.mount_frame` | empty | TF frame of the array, `{prefix}` and `{base_frame}` expand, a bare leaf joins the robot prefix, empty uses the base frame |
+| `auditory.microphones` | `[]` | Extra robot-mounted microphones |
+| `auditory.static_sounds` | `[]` | Launch-defined sound entities |
 
-Markers on `microphone_markers` show each position, name, inlet arrow, ON/OFF
-state and current dBFS. Solo changes only monitoring products; the raw array
-retains all four channels.
+The launch also derives `env.ns`, `render.role` per renderer and
+`pedestrian_listeners.discrete.enabled` (from `viz.enabled`). The old flat
+names (`auditory.playback`, `auditory.viz`, `microphone_mode`, ...) still work
+with a deprecation warning, see
+[BRINGUP.md](../arena_bringup/BRINGUP.md#deprecated-launch-args).
 
-Equivalent parameter commands include:
+## Messages
+
+`arena_auditory_msgs` holds every auditory interface:
+
+| Type | Purpose |
+|---|---|
+| `SoundSource` | One emitter and its emission: id, kind, asset and variant, model, agent, position, level, seed, streamed model state (`state_names`, `state_values`), content such as speech text (`content_names`, `content_values`) |
+| `SoundReception` | One listener's result: level, delay, bearing, audibility, occlusion, backend, portal route, `rir_key` |
+| `SoundEvent`, `HeardSoundEvent` | Finite sound, before and after propagation |
+| `ContinuousAudioSourceState`, `ContinuousHeardSoundState` | Continuous source, before and after propagation |
+| `RoomImpulse` | Room impulse response by key, direct arrival normalized to 1 |
+| `AcousticPath` | Early reflection of a reception |
+| `AudioFrame` | Interleaved float32 PCM with channel names, frames, positions and yaws |
+| `RenderedSoundActivity` | Start and end sample of every rendered source |
+| `AuditoryDetection` | Bearing, level and kind of a detected sound, the input of the belief grid |
+| `SpawnSound`, `RemoveSound`, `SpawnMicrophone`, `RemoveMicrophone` | Runtime sources and microphones |
+
+## Topics
+
+Names below the task generator node, `<r>` is a robot name:
+
+| Topic | Type | Publisher |
+|---|---|---|
+| `sound_events` | `SoundEvent` | emitters, sounds module |
+| `continuous_audio_sources` | `ContinuousAudioSourceState` | `robot_emitter`, sounds module |
+| `heard_sound_events` | `HeardSoundEvent` | propagation |
+| `continuous_heard_sounds` | `ContinuousHeardSoundState` | propagation |
+| `acoustic/impulses` | `RoomImpulse`, latched, depth 256 | propagation, before the first reception that references the key and again once `IMPULSE_WINDOW` newer keys went out |
+| `microphone_listeners` | `std_msgs/String` JSON list, latched | propagation |
+| `microphone_markers` | `MarkerArray` | propagation |
+| `<r>/audio/raw_array` | `AudioFrame` | `array_renderer` |
+| `<r>/audio/stem_motor`, `stem_pedestrian`, `stem_ambient` | `AudioFrame` | `array_renderer` |
+| `<r>/audio/headphones/stereo` | `AudioFrame` | `array_renderer` |
+| `<r>/audio/hearing/mono` | `AudioFrame` | `array_renderer`, only while subscribed |
+| `<r>/audio/hearing/energy` | `std_msgs/Float32MultiArray` | `array_renderer`, only while subscribed |
+| `<r>/audio/diagnostics/tdoa` | `std_msgs/String` JSON | `array_renderer`, only while subscribed |
+| `<r>/audio/diagnostics/levels` | `MarkerArray`, per-microphone dBFS text in the mount frame | `array_renderer`, only while subscribed |
+| `<r>/audio/diagnostics/render_inputs` | `std_msgs/String` JSON | `array_renderer` |
+| `<r>/audio/rendered_sound_activity` | `RenderedSoundActivity` | `array_renderer` |
+| `audio/listener/monitor` | `AudioFrame` | `listener_renderer`, only while subscribed |
+| `<r>/heard_sound`, `<r>/heard_sound_marker` | `HeardSoundEvent`, `Marker` | `robot_hearing_node` |
+| `<r>/hearing/<frontend>/detections` | `AuditoryDetection` | `robot_hearing_node` (bus), srp and seld front-ends |
+| `<r>/motor_sound_markers` | `MarkerArray` | `robot_emitter` |
+| `pedestrian_sound_propagation_markers`, `robot_sound_propagation_markers`, `acoustic_room_markers`, `environment_audio_source_markers` | `MarkerArray` | visualizer |
+
+`<env ns>/pedestrian_markers/extra` carries the pedestrian footstep and speech
+cones. The hearing topics live below the env namespace, see
+[Robot-side hearing](#robot-side-hearing).
+
+## Listeners
+
+Every listener has a string id:
+
+| Id | Listener |
+|---|---|
+| `robot:<r>` | Array centroid of robot `<r>`, always propagated, the input of the bus |
+| `array:<r>:<mic>` | One microphone of the robot array, for every fleet robot |
+| `microphone:robot:<r>:<placement>:<index>` | `auditory.microphones` entry |
+| `microphone:zone:<zone>:<placement>:<index>` | World microphone from `world.yaml` |
+| `microphone:runtime:<n>` | Spawned with the RViz tool, cleared on episode reset |
+| `microphone:viewport:projective_center`, `microphone:viewport:down_projection` | Viewport camera, propagated only while selected |
+| `agent:<id>` | Pedestrian, with `pedestrian_listeners.enabled` |
+
+The selected `listener.id` microphone is propagated in addition.
+
+### Robot arrays
+
+`array.spec` picks a preset from `config/arrays/` or a yaml path:
+
+| Preset | Microphones | Rate | Block |
+|---|---|---|---|
+| `mono` | `mono` at the base frame | 44100 Hz | 512 |
+| `stereo` | `left`, `right`, 0.20 m apart at 0.35 m | 44100 Hz | 512 |
+| `four_mic` | `front_left`, `front_right`, `rear_left`, `rear_right` | 16000 Hz | 320 |
+
+`four_mic` is the Jackal rectangle: each microphone sits 0.020 m in from the
+two nearest edges of the 0.420 m by 0.310 m chassis, at z = 0.220 m. That
+gives 0.380 m front to back, 0.270 m left to right, and inlet yaws of +-45 and
++-135 deg. With 343 m/s the far-field delays reach 1108 us (17.7 samples)
+front to back and 787 us (12.6 samples) left to right. Sensitivity is -26 dBFS
+at 94 dB SPL, after the Seeed reSpeaker XMOS XVF3800 reference (raw channels,
+no onboard AEC, AGC or beamforming). A custom array is a yaml with `name`,
+`sample_rate_hz`, `block_size`,
+`sensitivity_dbfs_at_94_dbspl` and either `mics` (each `name`, `position_m`,
+`yaw_deg`, `side`, `group`) or `rectangular`.
+
+The robot's own sources (the motor) reach its array microphones through the
+fixed free-field direct path from the source to each microphone, so the
+ego-noise level stays constant in rooms, doorways and zone gaps alike.
+
+The array renderer renders every robot of the fleet in one node, each with its
+own `<r>/audio/*` topics, render state and lockstep channel. The workstation
+output plays one of them: `array.robot` when set, else the first fleet robot.
+
+### Extra microphones
+
+Robot-mounted microphones come from `auditory.microphones`:
 
 ```bash
-ros2 param set /arena/env_0/task_generator_node/microphone_array_node mute_all true
-ros2 param set /arena/env_0/task_generator_node/microphone_array_node monitor_gain_db 36.0
-ros2 param set /arena/env_0/task_generator_node/microphone_array_node solo_channel front_left
-ros2 param set /arena/env_0/task_generator_node/microphone_array_node tdoa_enabled true
+arena launch auditory:=arena \
+  auditory.microphones:='[{owner: robot, robot: jackal, placement: front, frame: front_laser, index: 1}]'
 ```
 
-Run the console diagnostic with:
+A relative frame resolves below the robot's frame prefix. The listener is
+inactive while the robot is absent or TF cannot resolve the frame.
+
+World microphones are authored per level in `world.yaml` beside `zones`:
+
+```yaml
+microphones:
+  - {zone: reception, placement: ceiling, frame: map, position: [4.2, 3.1, 2.9], index: 1}
+```
+
+World loading rejects missing zones, duplicate ids, positions outside the zone,
+ceiling placements in zones without a ceiling and heights more than 5 cm off an
+explicit `ceiling_height`.
+
+## Rendering
+
+The renderers are driven by `/clock`. Every clock message renders the blocks
+it covers, so sample zero stays anchored to the sim time of the first block.
+A heard event is anchored one block past the next unrendered block.
+When the render falls more than `render.max_catchup_blocks` behind, the
+surplus blocks are skipped and counted. Under `arena lockstep`, the array
+renderer registers one hard channel `audio/<r>` per rendered robot with one
+block per window, so the skip path never fires. Belief (`belief/<r>`), policy (`policy/<r>`) and
+the front-end heartbeats are hard channels too.
+
+Both renderers select the source program through the source models of
+`sources/`: `wav` for one-shot clips, `wav_loop` for loops and `drivetrain`
+for the procedural Jackal motor. A model is buffered (a decoded sample) or
+streamed (a block generator built by its `stream()` from the seed, the
+variant's `params` and the live tuning of its parameter group, then driven
+each block by the source's `state`). A new streamed source is one synth class,
+one `SOURCE_MODELS` line and a sound manifest variant naming the model.
+Neither renderer touches the world or pyroomacoustics. A source with a `rir_key` is convolved with the impulse from
+`acoustic/impulses` when `render.rir.enabled` is set, and a key change
+crossfades over `render.rir.crossfade_s`. The array renderer defaults to dry
+rendering. A renderer subscribes to `acoustic/impulses` only while
+`render.rir.enabled` is set, keeps the impulses its voices reference plus the
+`IMPULSE_WINDOW` most recently announced, drops them all on a world change and cuts each impulse where
+its remaining energy falls 60 dB below its total, and no earlier than the direct
+arrival.
+
+The array renderer gates a source per robot: an event or continuous source
+plays on all of a robot's microphones when any of its `array:<r>:<mic>` or
+`robot:<r>` receptions passes `render.inaudible.enabled` and
+`render.min_level_db`, else on none. Near the threshold or at a wall edge a
+sound therefore never reaches only a subset of the microphones, which would
+fake level and delay differences.
+
+### Stems
+
+`raw_array` is the clipped mix. The three stems split the same pre-clip mix by
+the `stem` of each source's sound kind (`SoundSource.kind`), whoever emits it:
+
+| Stem | Kinds |
+|---|---|
+| `stem_pedestrian` | `footstep`, `speech`, also when a robot speaks |
+| `stem_ambient` | `music`, `alarm` |
+| `stem_motor` | `motor`, the ego-noise |
+
+All four share channel order, stamp and sample clock, so an episode can be
+remixed at another ego-noise attenuation offline: weight the stems, add them
+and clip the result to [-1, 1] the way the renderer does. The diagnostics count
+clipped samples, which tells whether `raw_array` itself was clamped.
+
+`diagnostics/render_inputs` carries one JSON object per block with the
+complete input state of the block (version 2: channels, stems, RIR keys and
+streamed sources with their model, params, state and tuning). Clips and
+continuous sources name their sample by its key `<asset id>#<variant id>`.
+`auditory_offline_render` reproduces the recorded audio from that trace alone,
+bit for bit. Traces recorded before keys carried the asset id hold the bare
+variant id, which the offline replay alone resolves by searching the local
+sound assets for the one asset with that variant.
+
+### Monitor and output
+
+The headphone monitor is
+`L = (front_gain * front-left + rear_gain * rear-left) / gain_sum` and the
+mirrored right side, center microphones feeding both ears.
+`monitor.gain_db` (36 dB) is a workstation preamp that leaves `raw_array`
+untouched, `monitor.limit` bounds the peaks and `monitor.solo` routes one
+microphone to both ears. `monitor.mode: hearing` previews the
+highest-energy microphone instead. Docker playback uses the host
+PulseAudio or PipeWire socket forwarded as `/tmp/pulse/native`.
+
+Rendered blocks reach the device through a jitter buffer. It plays silence
+until `output.buffer_s` (0.04 s) of audio is queued, at start and after every
+underflow, and drops the oldest audio back to that level once the queue
+exceeds it by more than its own length rounded up to whole render blocks.
+`output.buffer_s` has to cover the `/clock` period, raise it on repeated
+underflows. The `latency_s` of the output diagnostics is the running median
+from push to the DAC.
+
+Every reception is an SPL at the microphone. Both renderers apply the
+`sensitivity_dbfs_at_94_dbspl` calibration of their array spec, the listener
+renderer that of `mono`.
+
+## Sound library
+
+Sounds are assets of the `Sound` kind, resolved like every other Arena asset:
+world-local `worlds/<w>/assets/Common/Sound/<name>/`, then
+`$ARENA_ASSETS_DIR_LOCAL/Common/Sound/<name>/`, then the bundled
+`share/arena_auditory/sounds/Common/Sound/<name>/`, then the network
+providers. Each asset directory holds `<name>.yaml` and its wavs:
+
+```yaml
+version: 2
+kind: music
+desc: Looping radio music.
+tags: [music, radio, loop, environment]
+level_db: 62.0              # SPL at reference_distance_m
+reference_distance_m: 1.0
+normalize_dbfs: -12.5
+loop: true
+model: wav_loop
+variants:
+  - {id: radio_loop_01, file: radio_loop.wav}
+```
+
+`desc` and `tags` describe the asset for the asset database, which indexes
+sounds from these keys. Variant ids are unique within their asset. Variants
+may carry `match` (for example `{floor: [oak]}` on footsteps),
+`default: true`, `tags`, a per-variant `model` and `params`. The producer picks
+the variant deterministically from the source seed. Footsteps match the floor
+material under the pedestrian. A manifest may add new kinds through a `kinds:`
+mapping whose rows declare a `stem` like the kinds table. The library reads
+these fragments from every manifest in the world, shared local and bundled
+trees when it starts and on every world switch, so the kinds table is complete
+before any asset loads. An asset only a network provider holds adds its kinds
+when it first loads.
+
+`config/sounds.yaml` holds the kinds table:
+
+| Kind | Agent | Stem | Default asset | Notes |
+|---|---|---|---|---|
+| `footstep` | pedestrian | `pedestrian` | `footstep` | detected, marker |
+| `speech` | pedestrian | `pedestrian` | `greeting` | detected, marker |
+| `music` | environment | `ambient` | `radio_loop` | |
+| `alarm` | environment | `ambient` | `alarm_loop` | |
+| `motor` | robot | `motor` | `motor` | marker, `jackal_drivetrain` variant for Jackals |
+| `onset` | | `ambient` | | class-agnostic detection of the srp front-end |
+
+`stem` is required and one of `pedestrian`, `ambient` and `motor`, the renderer
+stem the kind's sources land in.
+
+The bundled assets are `footstep`, `greeting`, `motor`, `radio_loop` and
+`alarm_loop`. Inspect and move them with the asset CLI:
 
 ```bash
-ros2 run arena_auditory microphone_diagnostic --ros-args \
-  -p topic:=/arena/env_0/task_generator_node/jackal/audio/raw_array
+arena asset ls sound
+arena asset find sound footstep
+arena asset pull sound <name>
+arena asset push sound <name>
 ```
 
-It reports FL/FR/RL/RR dBFS, GCC-PHAT estimates for FL-FR, RL-RR, FL-RL and
-FR-RR, and explicitly labelled coarse energy evidence.
-
-### Four-microphone tests
-
-```bash
-python3 -m pytest arena_auditory/tests/unit/test_four_mic_array.py -q
-```
-
-The tests cover geometry, rigid motion, channel independence, known
-left/right/front/rear arrival ordering, fractional delay, MEMS calibration,
-silence, stereo asymmetry, monitor-only amplification, streaming fractional
-delay history, and disable/mute/solo/re-enable behavior. At 5 m
-from the array center, default geometry produces 786.604 us FR-minus-FL delay
-for a left source and 1,107.468 us RL-minus-FL delay for a front source.
-
-Known limitations are:
-
-- Full pyroomacoustics RIR samples are not serialized by `HeardSoundEvent`, so
-  raw PCM applies propagated direct/portal delay, calibrated level, occlusion
-  and route loss but not the detailed late RIR convolution.
-- The simple headphone map is not an HRTF, so front/back perception is weaker
-  than the timing information retained in the raw channels.
-- NLOS quality depends on authored acoustic zones and connected openings. With
-  no valid portal route, propagation reports its explicit Level-3/dry fallback
-  instead of fabricating diffraction.
-
-The generated RViz configuration shows pedestrian cones through
-`Arena/Pedestrians/Extra` and places each motor display in the corresponding
-`Arena/Robot: <name>` group. Source-to-listener paths, reflections, and door
-portals are shown through `Arena/Debug/Sound Propagation`. Heard-sound text is
-not added as a separate RViz display.
-
-The Auditory RViz panel provides an `Auditory Runtime` group, an
-`Audio Playback Microphone` group, a `Sound Entities` table, `Play robot motor
-audio on this workstation`, and a live `Motor Sound Tuning` group. The runtime
-group independently controls propagation and local radio/alarm playback. The
-listener group follows the transient microphone registry and updates human,
-robot, and environment playback. Its dropdown selects exactly one
-microphone, so workstation audio represents only what that microphone hears.
-It is visible in stereo mode and hidden whenever the four-mic array is active;
-four-mic monitoring instead uses the array's spatial stereo and diagnostic solo
-controls.
-The controls follow changes made through ROS parameters and
-persist across episode resets. `auditory.motor:=off` sets the initial
-mute state. This is separate from `auditory.robot_sound`, which controls
-simulated motor emission.
-
-The procedural defaults apply a `-9 dB` output trim, reduce the broadband
-mechanical-noise layer by `-12 dB`, and use a `1.5` velocity exponent so level
-changes are easier to hear as wheel speed changes. Frequency remains directly
-driven by signed left and right wheel velocity. The live controls are:
-
-- `motor_volume_db`
-- `motor_frequency_scale`
-- `motor_tonal_gain_db`
-- `motor_broadband_gain_db`
-- `motor_speed_exponent`
-- `motor_velocity_smoothing_sec`
+Looping files should match in waveform and level at both ends so the join
+does not click.
 
 ## World and launch-defined sounds
 
-The `sounds` Task Generator module is added to `task.modules` whenever
-`auditory` is not `none`, or `auditory.static_sounds` is non-empty. It renders
-every `sound` entity declared in the loaded world, the active scenario, and
-the launch configuration.
+The `sounds` task module is added to `task.modules` whenever `auditory` is not
+`none` or `auditory.static_sounds` is non-empty. It renders every `sound`
+entity declared in the loaded world, the active scenario and the launch
+configuration.
 
-A static or environment sound is a standalone `sound` semantic entity, not a
-container object with sub-emitters. The semantics engine, not the audio
-module, owns whether it is playing (`sounding`) and how loud (`volume_db`).
-The audio module is a pure renderer: it resolves each sound's placement,
-publishes its live state as `ContinuousAudioSourceState` for propagation, and
-serves the runtime spawn/remove services.
+A sound is a standalone `sound` semantic entity. The semantics engine owns
+whether it plays (`sounding`) and how loud (`volume_db`). The sounds module
+resolves its placement and publishes its live state as
+`ContinuousAudioSourceState`. A `sound` entry takes:
 
-A `sound` entry takes:
+- `name`: unique among world, scenario and launch sounds.
+- `asset_id`: a `Sound` asset.
+- exactly one of `position`, `entity_ref` or `frame`. `entity_ref` names one
+  static world entity, `offset` then rotates with its yaw. A direct `position`
+  is level-local and needs `level` in a multi-level world. `frame` names a TF
+  frame and `offset` is local to it, so a sound on `jackal/base_link` moves
+  with the robot. Until the frame exists the source is skipped with a warning.
+- `loop` (default `true`) and `reference_distance_m` (default `1.0`).
+- `semantics`: the `sound` preset, which expands to `sounding` and `volume_db`.
 
-- `name`: unique among all world-, scenario- and launch-defined sounds.
-- `asset_id`: a catalog entry from `acoustic_assets.yaml`.
-- `position`, `entity_ref` or `frame`, exactly one. `entity_ref` must name
-  one unique static world entity, and `offset` then rotates with that
-  entity's yaw. A direct `position` is level-local. `level` is required for
-  it in a multi-level world and only allowed with it. `frame` names a TF
-  frame (env prefix optional, added when missing) and `offset` is local to
-  that frame: the renderer publishes the frame, not a map point, and
-  propagation re-localizes the source on every update, so a sound on
-  `jackal/base_link` moves with the robot. While the frame is not yet in TF
-  the source is skipped with a warning, never placed at the origin.
-  Pedestrians publish no per-agent TF frame, so `frame` targets robots and
-  static frames.
-- `loop` (default `true`).
-- `reference_distance_m` (default `1.0`), must be positive.
-- `semantics`: a `semantics:` list carrying the `sound` preset, which expands
-  to a `sounding` predicate and a `volume_db` state.
-
-World sounds are authored per zone, as a sibling list to `schedules:` and
-`signals:`:
+World sounds are authored per zone:
 
 ```yaml
 zones:
@@ -440,702 +436,278 @@ zones:
     - {preset: sound, params: {sound_on: alarm}}
 ```
 
-`sound_on` names a regime consulted from another scripted kind, exactly like
-a gate's `unlock_on` or a pressure plate's `press_on` (see
-[AUTHORING.md](../../../../arena_simulation_setup/AUTHORING.md)). `hall_siren`
-stays silent until something asserts the `alarm` regime, for example a
-`schedule` entry (`{preset: schedule, params: {windows: [], regime: alarm}}`)
-whose `active` predicate a scenario timeline flips. Several `sound` entries
-that share one `sound_on` name toggle together as one logical alarm: the
-renderer groups them under the same wire `group_id`, so grouped sirens also
-share deterministic WAV-variant selection. They stay separate physical
-sources, so propagation still computes one independent speaker-to-listener
-path per sound and playback uses one independent RIR convolver each. A wall,
-doorway, or extra distance can therefore delay and attenuate each speaker
-differently.
-
-A world- or scenario-authored sound with no `sound_on` plays only when told
-to, and the sounds module warns at load about such a sound, with the service
-call that turns it on. An always-on device like a radio is authored with an
-initial value in its preset params,
-`{preset: sound, params: {sounding: true, volume_db: 62.0}}` (`sounding:` and
-`sound_on:` are exclusive). Anything can be toggled later, either from a
-scenario timeline entry:
-
-```yaml
-timeline:
-- at: 0.0
-  set:
-  - entity: lobby_radio
-    field: sounding
-    value: "true"
-```
-
-or live, through the `SetSemantic` service:
+`sound_on` names a regime, like a gate's `unlock_on` (see
+[AUTHORING.md](../arena_simulation_setup/AUTHORING.md)). Sounds sharing one
+`sound_on` toggle together and share their variant selection but stay separate
+physical sources, each with its own route, delay and impulse response. A
+world or scenario sound without `sound_on` plays only when told to. An
+always-on radio is authored as
+`{preset: sound, params: {sounding: true, volume_db: 62.0}}`. A different
+starting volume is a separate `{state: volume_db, value: 62.0}` entry. A sound without a starting volume plays at its
+asset's level, which is also what a timeline `when:` on its `volume_db` reads.
+Toggle a sound from a scenario timeline or live:
 
 ```bash
-ros2 service call \
-  /arena/env_0/task_generator_node/semantics/set \
+ros2 service call /arena/env_0/task_generator_node/semantics/set \
   task_generator_msgs/srv/SetSemantic \
   "{entity: env_0/lobby_radio/1, field: sounding, value: 'true'}"
 ```
 
-Unlike timeline entries, the external service does no bare-name resolution:
-`entity` is the realized instance name exactly as published on
-`state/semantics` (the bare name wrapped in the env namespace and, for
-world-embedded sounds, the level id). Read it off the snapshot topic when in
-doubt. Replace `env_0` when the runtime allocated a different environment. The same
-service writes `volume_db` (a float literal in `value`). An override on
-`sounding` is cleared automatically the next time the sound's natural
-(regime-consulted) value changes, matching every other scripted kind. A sound
-with no `sound_on` never has a natural transition, so a one-time override
-holds for the rest of the episode. Toggling a multi-speaker group this way
-needs one `SetSemantic` call per sound name, since each is an independent
-entity. Driving a shared `sound_on` regime instead moves the whole group with
-one write.
-
-Initial volume defaults to `80.0` dB. To author a different starting volume,
-add a separate `volume_db` entry, never a `value:` on the `sound` preset item
-itself (a preset-level `value` broadcasts onto every primitive the preset
-expands to, which would corrupt the `sounding` predicate too):
-
-```yaml
-sounds:
-- name: lobby_radio
-  asset_id: radio_loop
-  entity_ref: lobby_radio_cabinet
-  offset: [0.0, 0.0, 0.8]
-  semantics:
-  - {preset: sound}
-  - {state: volume_db, value: 62.0}
-```
-
-The bundled catalog registers `radio_loop.wav` and `alarm_loop.wav`. Custom
-looping files should have matching waveform and level at their beginning and
-end so the join does not click. A custom music entry has this form:
-
-```yaml
-assets:
-  radio_loop:
-    category: music
-    semantic_tags: [radio, background]
-    reference_level_db: 62.0
-    reference_distance_m: 1.0
-    normalization_dbfs: -9.0
-    loop: true
-    variants:
-      - sample_id: radio_loop_01
-        file: radio_loop.wav
-        tags: [music]
-        octave_band_levels_db: auto
-```
-
-Runtime spawns follow the same rule: `SpawnSound.attach_to_frame` keeps the
-request pose in its own frame instead of transforming it to `map` once.
-
-A scenario carries episode-scoped sounds in its own `sounds:` list, same
-schema, attached at reset and gone at the next one. Positions may be zone
-references like any other scenario placement, and `entity_ref` may name one
-of the scenario's `static:` obstacles. The `fire_alarm` scenario of
-`three_storied_residential` ships a `bedroom_radio` that plays until the
-alarm fires.
-
-For a sound that should be available in any scenario without editing a world,
-pass the same schema, as a flat list, through `auditory.static_sounds`:
+`entity` is the realized name published on `state/semantics`. Scenario sounds
+live in the scenario's own `sounds:` list and last one episode. Launch sounds
+use the same schema as a flat list and play from the start unless they name a
+`sound_on` or set `sounding`:
 
 ```bash
-arena launch \
-  world:=demo \
-  auditory:=arena \
+arena launch world:=demo auditory:=arena \
   auditory.static_sounds:='[{name: room_radio, asset_id: radio_loop, position: [5.0, 5.0, 1.2], level: level_1, semantics: [{preset: sound, params: {volume_db: 62.0}}]}]'
 ```
 
-A launch-defined sound plays from the start unless its entry names a
-`sound_on` regime or sets `sounding` itself, unlike a world-authored sound,
-which stays silent until told otherwise. Direct positions in
-`auditory.static_sounds` need `level` in a multi-level world, same as a
-world-authored direct `position`. Several radios are several
-list entries. A multi-speaker alarm is several list entries sharing one
-`sound_on`. World- and launch-defined sound names must be unique. To keep
-custom WAV files outside the package, pass
-`auditory.assets:=/path/to/acoustic_assets.yaml` and
-`auditory.sound_dir:=/path/to/wavs`.
+`sounding` controls simulated emission. `output.ambient.enabled` only mutes
+the workstation, propagation and robot hearing continue.
 
-A custom catalog replaces the bundled catalog for every playback node. Keep
-the bundled `footstep`, `greeting`, and motor entries in it, and keep their WAV
-files in the selected sound directory, alongside the new radio and alarm
-assets.
+## Propagation and portal routing
 
-`sound_type` and `semantic_tags` on the wire are derived from the asset
-catalog's `category` and `semantic_tags` fields for the sound's `asset_id`,
-falling back to the bare `asset_id` with no extra tags when it is not in the
-catalog.
+On world load, Arena pairs each authored door with the zone on its other side
+and derives an opening portal where two adjacent rooms agree that a shared
+boundary span is open. Each authored zone is one pyroomacoustics room.
+Same-zone sounds use one room-local impulse response. Cross-zone sounds follow
+a door or opening route up to `portal.max_hops`, composed from room-local
+segments. Without a connected route, propagation falls back to `level3`, then
+`legacy`, and records the reason. A robot hears its own noise sources at every
+`robot:<r>` and `array:<r>:<mic>` listener it owns through a fixed free-field
+direct path (1/d from the 1 m level, no occlusion, no impulse, so it renders
+dry), whatever the backend and wherever the robot drives.
 
-`sounding` and `SetSemantic` control simulated emission. The launch argument
-and live `enable_environment_playback` parameter on `environment_sound_playback`
-only mutes or unmutes local workstation output, so propagation and robot
-hearing continue while it is muted.
+The result is on every `SoundReception`: `backend`
+(`pyroomacoustics_same_room`, `pyroomacoustics_one_door`,
+`pyroomacoustics_multi_portal`, `level3`, `legacy_distance_occlusion`,
+`self_direct_path`), `used_fallback`, `fallback_reason`, `portal_ids`,
+`portal_positions`, `traversed_zones`, `route_loss_db` and `rir_key`.
+Propagation is the only owner of impulse responses. Every pyroomacoustics
+reception takes its level and delay from its RIR and carries its `rir_key`.
+Propagation quantizes source and listener by
+`rir.quantization_m` (0.10 m), caches by key and publishes a key on
+`acoustic/impulses` before the first reception that references it and again
+once 64 newer keys went out.
+Recording that topic makes an offline re-render with impulses
+reproducible. Dynamic door state is not published, so doors use
+`portal.door_loss_db` and derived openings `portal.opening_loss_db`.
 
-The default `auditory.block_size` is 2048 frames. If the host still reports
-repeated PulseAudio underflows under a heavy RIR workload, increase it to 4096.
-An occasional recovered underrun does not stop propagation or playback.
+With `pedestrian_listeners.enabled` (default false), every pedestrian other
+than the source is an `agent:<id>` listener whose receptions reach
+`BaseHumanSimulator.notify_stimulus`, edge-triggered on audibility, with the
+kind as stimulus name.
 
-RViz lists rendered sounds in `Arena/Sound Propagation/Environment Audio
-Sources`. Alarm-tagged sounds are red, other active sounds are cyan, and
-inactive sounds are gray. Sounds use a box marker oriented by the placement
-drag. The **Spawn Radio** toolbar tool creates a source at runtime through
-`spawn_sound`. Set its `Mode` property to `Music` or `Alarm`, set
-`Height`, then click and drag in the map. By default the source starts the
-corresponding bundled loop immediately. Enable `Custom Playback` to choose
-another catalog asset ID, source volume, loop behavior, or an initially
-stopped state. The runtime transforms the RViz Fixed Frame pose into the
-global map, so placement also works in allocated environment frames. Use the
-`Sound Entities` row toggle to start or stop emission and playback
-(a `SetSemantic` write on `sounding`, same as any other sound). Select a
-`runtime_*` row and use `Remove selected runtime source` to delete it
-(`remove_sound`). Runtime sources are cleared on the next episode
-reset. The existing robot or pedestrian heard-sound display shows each active
-source-to-listener path, portal route, and delay. Set the
-visualizer's `continuous_listener_id` parameter when a specific microphone
-should own the path display. If it is empty, the first continuous listener is
-used.
-
-## Microphones and playback routing
-
-Every robot in `state/robots` automatically creates a center microphone and a
-left/right pair named from the robot instance, for example `robot1_mic`,
-`robot1_left_mic`, and `robot1_right_mic`. All three follow the robot base TF
-frame. The side microphones are 20 cm apart at 0.35 m height by default, with
-left at positive robot y and right at negative robot y. RViz renders the center
-microphone green, the left microphone blue, and the right microphone orange.
-
-Both side microphones remain propagation listeners at the same time so their
-listener-specific delays and levels can later feed a direction-of-arrival
-estimator. The **Left microphone** and **Right microphone** buttons in the
-Auditory panel select which one feeds mono workstation playback; the existing
-dropdown remains available for every other listener. Playback selection does
-not disable propagation to either side microphone.
-
-The propagation-node parameters `robot_side_microphones`,
-`robot_side_microphone_separation_m`, `robot_microphone_height_m`, and
-`robot_microphone_forward_offset_m` control the automatic pair. Their defaults
-are `true`, `0.20`, `0.35`, and `0.0` respectively.
-
-Additional robot-mounted microphones can be configured with
-`auditory.microphones`. Each entry names the robot instance, placement,
-relative or robot-prefixed TF frame, and stable positive index:
-
-```bash
-arena launch \
-  auditory:=arena \
-  auditory.microphones:='[{owner: robot, robot: jackal, placement: body, frame: base_link, index: 1}, {owner: robot, robot: jackal, placement: front, frame: front_laser, index: 1}]'
-```
-
-The robot must exist in `state/robots`. A relative frame is resolved below that
-robot's frame prefix. The listener is inactive if the robot is absent or TF
-cannot resolve the frame. RViz shows one green triangular cone for each
-resolved microphone. The cones follow their TF frames. Entries may name
-different active robots, so one launch can expose microphones on several
-robots at the same time. Choose one of them in the RViz playback dropdown.
-
-World-mounted microphones are authored in each level's `world.yaml` beside
-`zones`:
-
-```yaml
-microphones:
-  - zone: reception
-    placement: ceiling
-    frame: map
-    position: [4.2, 3.1, 2.9]
-    index: 1
-  - zone: reception
-    placement: ceiling
-    frame: map
-    position: [7.8, 3.1, 2.9]
-    index: 2
-```
-
-These become `microphone:zone:reception:ceiling:1` and
-`microphone:zone:reception:ceiling:2`. World loading rejects missing zones,
-duplicate IDs, map-frame positions outside the declared zone, ceiling
-placements in zones without ceilings, and heights that differ from an
-explicit `ceiling_height` by more than 5 cm. A non-map TF frame is permitted,
-but its resolved runtime position must remain in the declared zone. Ceiling
-height falls back to `pyroom_ceiling_height_m` when the zone does not specify
-one.
-
-Microphones can also be added during an episode with the RViz **Spawn
-Microphone** toolbar tool. Click the desired position and set its `Height` tool
-property. Leave `Attach TF Frame` empty for a fixed microphone. Set it to a
-resolvable frame such as `env_0/jackal/base_link` to store the clicked offset
-in that frame and make the microphone follow it. The runtime transforms the
-clicked pose is registered immediately in its RViz or attached TF frame. The
-first click creates `microphone1`, followed by `microphone2` and later
-increasing IDs. These runtime microphones are cleared and the index restarts
-on the next episode or world change.
-
-The new microphone appears immediately in the Auditory panel's **Audio
-Playback Microphone** dropdown and as a green triangular cone in
-`Arena/Sound Propagation/Microphones`. Select it in **Listen through** to hear
-only that microphone's propagated audio.
-The spawn service is available at
-`<task-generator-namespace>/runtime/spawn_microphone` while auditory simulation
-is enabled.
-
-Every finite human or robot clip is published as `SoundEvent` and propagated
-to one `HeardSoundEvent` per listener. Procedural drivetrain audio uses
-`ContinuousAudioSourceState` and `ContinuousHeardSoundState` because it also
-carries wheel velocities, active state, backend, and deterministic seed. Both
-heard message types identify the receiving microphone in `listener_id`.
-Microphones do not publish separate PCM topics. The listener-specific messages
-share `heard_sound_events` and `continuous_heard_sounds`; the playback nodes
-filter those streams, render the selected feeds, and send the result to their
-configured workstation `audio_device`.
-
-The RViz dropdown applies one microphone ID to `human_sound_playback`,
-`robot_sound_node`, and `environment_sound_playback`, and keeps that selected
-listener in propagation. The robot left/right pair is always propagated in
-addition. For a non-RViz workflow, set `auditory.listener:=robot1_mic` or
-another registered microphone ID at launch.
-
-### Verify robot side microphones
-
-Start one Jackal, a looping test radio, propagation visualization, and local
-playback:
-
-```bash
-arena launch \
-  world:=map_empty \
-  robot:=jackal \
-  auditory:=arena \
-  auditory.viz:=true \
-  auditory.static_sounds:='[{name: mic_test_radio, asset_id: radio_loop, position: [2.0, 2.0, 1.2], semantics: [{preset: sound}]}]'
-```
-
-In another shell, confirm registration and RViz marker publication:
-
-```bash
-ros2 topic echo \
-  /arena/env_0/task_generator_node/microphone_listeners \
-  --qos-durability transient_local --once
-
-ros2 topic echo \
-  /arena/env_0/task_generator_node/microphone_markers \
-  --once --field markers
-```
-
-The registry must contain `<robot>_left_mic` and `<robot>_right_mic`. In RViz,
-enable `Arena/Sound Propagation/Microphones`; the blue and orange cones must
-move and rotate with the robot. Click **Left microphone** and **Right
-microphone** under **Legacy Audio Playback Microphone** to compare playback. Confirm
-that the selection reached all playback nodes and propagation, replacing
-`jackal_left_mic` if the registry shows a different robot name:
-
-```bash
-ros2 param get \
-  /arena/env_0/task_generator_node/human_sound_playback listener_id
-ros2 param get \
-  /arena/env_0/task_generator_node/robot_sound_node listener_id
-ros2 param get \
-  /arena/env_0/task_generator_node/environment_sound_playback listener_id
-ros2 param get \
-  /arena/env_0/task_generator_node/sound_propagation_node active_microphone_id
-```
-
-Finally, confirm that propagation continues to publish both side listeners,
-regardless of which playback button is selected:
-
-```bash
-ros2 topic echo \
-  /arena/env_0/task_generator_node/continuous_heard_sounds \
-  --field listener_id
-```
-
-The stream must repeatedly contain both `<robot>_left_mic` and
-`<robot>_right_mic`. Finite greetings and footsteps can be checked similarly
-on `heard_sound_events`.
-
-Once the simulator viewport publishes `/arena/viewport/camera_pose`, the
-dropdown also offers `microphone:viewport:projective_center` (the camera
-position) and `microphone:viewport:down_projection` (the camera x/y at
-`auditory.viewport_height`, default 1.6 m). They are propagated and drawn only
-while one of them is selected, following the camera for as long as the
-selection holds. Selecting another listener removes them again.
-
-## Pyroomacoustics portal routing
-
-Enable the pyroomacoustics backend and optional RViz path visualizer with:
-
-```bash
-arena launch \
-  auditory:=arena \
-  auditory.propagation:=pyroomacoustics \
-  auditory.viz:=true
-```
-
-On world load, Arena pairs each authored door with the acoustic zone touching
-the other side. It also derives an opening portal when both adjacent room
-specifications agree that a shared boundary span is open. Explicit doors take
-precedence over derived openings.
-
-Each authored zone including a corridor or a rectangular whole world
-zone is treated as one ordinary pyroomacoustics room. Enclosed mini-room zones
-remain separate rooms. Same-zone sounds use one room-local RIR. Cross-zone
-rendering follows a door/opening portal route by default, up to
-`max_portal_hops`. A route is rendered by composing room-local RIR segments:
-source-to-portal in the source room, portal-to-portal through intermediate
-rooms, then portal-to-listener in the listener room. Routes with no connected
-portal path use the explicit Level-3/dry fallback. Room and portal-route RIRs
-are quantized and cached.
-
-With `ped_hearing=true` (the launch default via `auditory.ped_hearing`),
-every non-source pedestrian is an `agent:<id>` listener whose
-`continuous_heard_sounds` states feed `BaseHumanSimulator.notify_stimulus`,
-edge-triggered on the `audible` bit with the catalog `sound_type` as the
-stimulus name. With `false`, pedestrian-to-pedestrian propagation is not
-calculated or published and the RViz propagation visualizer has no
-corresponding blue paths to draw. Robot and microphone listener events
-receive the complete route metadata. Human events are rendered
-by `human_sound_playback`, and robot events are rendered by
-`robot_sound_node`. The launch default sets
-`auditory.rir_in_propagation:=true`, so the propagation node
-constructs the same-room or portal-route RIR and reports the actual
-`pyroomacoustics_same_room`, `pyroomacoustics_one_door`, or
-`pyroomacoustics_multi_portal` backend in ROS propagation results. Playback
-remains the stage that applies the RIR to the waveform.
-
-Dynamic open/closed door state is not currently published by Arena, so
-authored doors use `portal_loss_db`. Derived openings use
-`opening_portal_loss_db`.
-
-`HeardSoundEvent.propagation_level` remains the model capability level for
-compatibility. Inspect these fields for the actual route:
-
-- `propagation_backend`: `pyroomacoustics_same_room`,
-  `pyroomacoustics_one_door`, `pyroomacoustics_multi_portal`, `level3`, or a
-  legacy path.
-- `used_backend_fallback` and `backend_fallback_reason`: whether and why the
-  requested pyroomacoustics route could not run.
-- `portal_id` and `portal_position`: the paired door used by one-door coupling.
-- `portal_ids`, `portal_positions`, `traversed_zones`, `portal_hop_count`, and
-  `portal_route_loss_db`: the complete selected route. The singular fields
-  retain the first portal for compatibility.
-
-The propagation node logs paired/unpaired doors, acoustic-zone coverage
-warnings, and each distinct backend route. Playback logs its independently
-verified `playback_backend` and dry/silent fallback reason. Its five-second
-diagnostics include room/portal RIR cache entries, hits, misses, mixer stream
-state, callback count, voice count, last output peak, and decoded-asset cache
-entries, hits, misses, and pending worker loads.
-
-Procedural Jackal audio uses the same playback-side pyroomacoustics RIR lookup
-as WAV assets. Its bundled recording-room/microphone transfer is disabled, so
-same-room or portal-coupled pyroomacoustics is the only simulated room response.
-Propagation constructs the RIR for ROS propagation metadata; playback obtains
-the equivalent cached RIR and applies it to the waveform once. Moving-source
-RIR lookup uses 0.10 m source/listener position quantization in playback and
-0.25 m quantization in propagation. RIR changes use a 100 ms equal-power
-crossfade. Continuous convolution uses 1024-frame uniform FFT partitions at
-44,100 Hz. The listener signal is mono because it represents one robot
-microphone.
-
-The drivetrain broadband noise field is approximately 33 MB. All Jackal voices
-in one episode use the episode seed as the field-cache key, so they reference
-one shared read-only field instead of allocating approximately 33 MB per robot.
-Each robot derives a stable phase and starting-position index from the episode
-seed and robot name, preserving deterministic differences between robots. The
-shared field is cleared on episode reset; a new episode builds one field for its
-new seed.
-
-The asset catalog loads only YAML metadata and validates WAV paths at startup.
-The selected WAV is decoded, channel-converted, resampled, and normalized on a
-single background worker the first time it is used. The decoded
-`CachedSample` is retained for subsequent events; the real-time mixer callback
-never performs file I/O or decoding. Configure explicit
-`octave_band_levels_db` values for every variant in
-`acoustic_assets.yaml` so lazy decoding does not need to perform spectral
-analysis. The current bundled assets contain precomputed values.
-
-Docker playback uses the host PulseAudio/PipeWire compatibility socket. The
-image installs `libasound2-plugins`, Compose forwards the socket as
-`/tmp/pulse/native`, `auditory.playback:=auto` prefers the `pulse` device
-(then `pipewire`, `default`, and the PortAudio default).
-
-RViz draws the complete source-to-portals-to-listener line and one cube per
-portal. Pedestrian-listener propagation is blue; robot-listener propagation
-is purple, on separately controllable marker topics.
-
-Audit every installed world before relying on RIR coverage:
+Audit installed worlds before relying on RIR coverage:
 
 ```bash
 ros2 run arena_auditory acoustic_world_audit --stride-cells 10
 ```
 
-The command reports missing maps, traversable cells outside zones, overlapping
-zones, explicit and derived portals, unpaired doors, and graph components. It
-returns a non-zero status when map/zone coverage is incomplete.
+It lists missing maps, traversable cells outside zones, overlapping zones,
+portals, unpaired doors and graph components, and returns non-zero when
+coverage is incomplete.
 
-The current repository audit intentionally reports the remaining world-data
-issues instead of fabricating acoustic geometry:
+## RViz plugins
 
-- `hospital_1`: four sampled free border cells below the authored zone bounds.
-- `hospital_2`: its two levels do not provide occupancy-map YAML files.
-- `map_empty`: free elevator/outside-door cells are outside `empty_zone`.
-- `reception`: free map cells above the authored `y=23` room boundaries.
-- `three_storied_residential`: some free entry cells are outside its zones.
+`arena_auditory_viz` ships an RViz panel and two tools. `arena viz` adds them
+to the generated configuration whenever the package is installed.
 
-The residential map YAML files reference the bundled `map.png` files. Multi-
-level portal extraction is level-scoped, so geometrically overlapping floors
-are never coupled to each other. Correct the remaining world/scenario data when
-those locations must receive physically modelled RIRs; until then they retain
-an explicit Level-3/dry fallback.
+**AuditoryPanel** (`arena_auditory_viz::AuditoryPanel`, config key `Target`,
+default `/task_generator_node`) talks to `<Target>/array_renderer`,
+`<Target>/listener_renderer` and `<Target>/sound_propagation_node`:
 
-Main routing controls are:
+| Control | Parameter |
+|---|---|
+| Enable sound propagation | `propagation.enabled` on propagation |
+| Play environment audio on this workstation | `output.ambient.enabled` on both renderers |
+| Robot Microphone Array group | `array.enabled`, `monitor.enabled`, `array.muted`, `monitor.master_gain_db`, `monitor.gain_db`, `monitor.front_gain`, `monitor.rear_gain`, `monitor.solo`, `monitor.mode`, `tdoa.enabled` on `array_renderer` |
+| Play robot motor audio on this workstation | `output.motor.enabled` on both renderers |
+| Motor Sound Tuning | `motor.trim_db`, `motor.frequency_scale`, `motor.tonal_gain_db`, `motor.broadband_gain_db`, `motor.speed_exponent`, `motor.velocity_smoothing_s` on both renderers |
 
-- `derive_opening_portals` (default `true`)
-- `minimum_opening_width_m` (default `0.30`)
-- `enable_multi_portal_rir` (default `true`)
-- `max_portal_hops` (default `4`)
-- `portal_loss_db` (default `3.0`)
-- `opening_portal_loss_db` (default `0.5`)
-- `route_distance_loss_db_per_m` (default `0.05`)
-- `portal_source_early_window_sec` (default `0.08`)
-- `portal_max_rir_duration_sec` (default `2.0`)
-- `ped_hearing` (default `false`, launch sets `true`)
-- `compute_rir_in_propagation` (default `true`)
-- `pyroom_cache_position_quantization_m` (default `0.25`)
+**Workstation Listener** lists the ids of `microphone_listeners`. An
+`array:<r>:<mic>` id sets `output.enabled=true` on `array_renderer` and
+`listener.id=""` on `listener_renderer`, so the array monitor plays. Any other
+id sets `output.enabled=false` on `array_renderer` and `listener.id` on
+`listener_renderer` and propagation. **Left microphone** and **Right
+microphone** pick `array:<r>:left` and `array:<r>:right` when the stereo array
+is active. **Sound Entities** lists every `kind == "sound"` entity of
+`state/semantics`. A check toggles `sounding` through `semantics/set`, and
+runtime sources can be removed through `runtime/remove_sound`.
 
-## Tests
+**SpawnSoundTool** (shortcut `r`) places an environment source through
+`runtime/spawn_sound`. `Kind` is an environment sound kind (default `music`),
+a rejected kind logs the accepted ones. `Height` sets z. Without `Custom
+Playback` the kind's default asset plays at its own level, with it the asset
+id, source level, loop flag and initial state are yours to set. Click and drag
+sets the pose in the RViz fixed frame.
 
-Run the auditory ROS tests:
-
-```bash
-python3 -m pytest arena_auditory/tests/ros/test_sound_event.py -q
-```
-
-Run only the full auditory round-trip test:
-
-```bash
-python3 -m pytest \
-  arena_auditory/tests/ros/test_sound_event.py::test_auditory_round_trip_greeting_reaches_robot_marker \
-  -q
-```
-
-The round-trip test checks:
-
-1. A synthetic `SoundEvent` with `sound_type="greeting"` is published.
-2. `sound_propagation_node` creates a `HeardSoundEvent` for `robot:robot1`.
-3. `robot_hearing_node` republishes it on `robot1/heard_sound`.
-4. `robot_hearing_node` publishes an RViz text marker on
-   `robot1/heard_sound_marker`.
-5. The marker text indicates the robot heard a greeting.
-
-## Benchmark
-
-Use the benchmark when you want a same-condition CPU and latency comparison.
-The baseline and auditory commands should differ only by `auditory`.
-
-```bash
-ros2 run arena_auditory auditory_benchmark \
-  --baseline-cmd "python3 -m arena_bringup.supervisor sim:=gazebo headless:=true human:=arena rviz:=false auditory:=none" \
-  --auditory-cmd "python3 -m arena_bringup.supervisor sim:=gazebo headless:=true human:=arena rviz:=false auditory:=arena" \
-  --duration-sec 120 \
-  --startup-delay-sec 20 \
-  --output-json /tmp/auditory_benchmark.json \
-  --output-csv /tmp/auditory_benchmark.csv
-```
-
-
-The benchmark reports:
-
-- average and max process-tree CPU usage
-- observed `SoundEvent` count
-- observed `HeardSoundEvent` count
-- latency from matching `SoundEvent` to `HeardSoundEvent`
-
-This latency is propagation/message-flow latency. It does not measure physical
-speaker-device latency.
-
-## Configuration
-
-- Sound assets: `arena_auditory/config/acoustic_assets.yaml`
-- Acoustic materials: `arena_auditory/config/acoustic_materials.yaml`
-- Launch wiring: `task_generator/launch/auditory/` (axis dispatch, `arena/arena.launch.py` node stack)
-- Node-side axis: `task_generator/task_generator/simulators/auditory/`
-- Nodes and DSP: `arena_auditory/arena_auditory/`
-- Human event generation: `arena_auditory/arena_auditory/auditory_events.py`
+**SpawnMicrophoneTool** (shortcut `m`) places a microphone through
+`runtime/spawn_microphone` at the clicked point and `Height`. `Attach TF
+Frame` makes it follow a frame. Runtime microphones are
+`microphone:runtime:<n>` and are cleared on the next episode or world change.
 
 ## Robot-side hearing
 
-`arena_auditory.hearing` is the consumer side. `hearing_belief` turns
-`task_generator_msgs/HeardSoundEvent` into a decaying pedestrian-likelihood
-grid in the map frame and publishes it as an RViz `OccupancyGrid`
-(`hearing/belief_grid`) and a wedge `MarkerArray`. `hearing_policy` reads that
-grid and is the single writer of the Nav2 `SpeedFilter` mask
-(`hearing/speed_filter_mask`): a listen-then-yield policy that layers a
-corner-listen speed cap and a yield hold on top of the belief slowdown. A live
-SELDnet front-end, or the untrained `srp` front-end (energy-onset detection
-plus array GCC-PHAT bearing), turns the 4-mic `AudioFrame` stream into the
-same event message, so the belief node is source-agnostic.
+`arena_auditory.hearing` is the consumer side. Every detection source
+publishes `AuditoryDetection`, so the belief node is source-agnostic:
 
-### Nodes and entry points
-
-| entry point | what it is |
+| Frontend | Source |
 |---|---|
-| `hearing_belief_node` | belief grid (`hearing/belief_node.py`, estimator in `hearing/belief_grid.py`) |
-| `hearing_policy` | listen-then-yield, the single writer of the Nav2 speed-filter mask (`hearing/policy_node.py`, pure logic in `hearing/policy.py` and `hearing/corners.py`) |
-| `hearing_seld_frontend` | live SELDnet front-end: `AudioFrame` -> `HeardSoundEvent` at 10 Hz (`hearing/seld_frontend_node.py`, model in `hearing/seld.py`) |
-| `hearing_srp_frontend` | untrained front-end: energy-onset detection plus array GCC-PHAT bearing, `AudioFrame` -> `HeardSoundEvent` at 10 Hz (`hearing/srp_frontend_node.py`, onset detector in `hearing/onset.py`) |
-| `hearing_audio_replay` | publishes a 4-channel wav as `AudioFrame` blocks, for front-end tests |
+| `bus` | `robot_hearing_node`, the propagated `robot:<r>` receptions, map-frame bearings |
+| `srp` | `hearing_srp_frontend`, energy onsets plus GCC-PHAT over `raw_array`, array-frame bearings, kind `onset` |
+| `seld` | `hearing_seld_frontend`, the SELDnet model over `raw_array`, array-frame bearings |
+
+Every hearing node covers every fleet robot of its env: it follows
+`state/robots`, keeps its state per robot and registers one hard lockstep
+channel per robot. `hearing_belief` turns each robot's detections into a
+decaying pedestrian-likelihood grid (`hearing/belief_grid`,
+`hearing/belief_wedges`). `hearing_policy` reads it and is the single writer
+of the robot's Nav2 `SpeedFilter` mask (`hearing/speed_filter_mask`) and its
+`CostmapFilterInfo` (`hearing/costmap_filter_info`).
+
+The front-ends read the array geometry off each `AudioFrame`: `srp` fits
+GCC-PHAT over every pair of the microphone positions the frame declares, any
+array of two or more microphones apart in the plane, and rebuilds when the
+layout changes. `seld` reads only the array its weights were trained on
+(`array` in `config/weights.yaml`): a stream whose sample rate, channel names
+or microphone positions differ is refused with an error. Both convert levels
+to dB SPL with the MEMS sensitivity of `array.spec`.
 
 ### Running in an Arena env
 
-`robot.hearing:=bus` on `arena launch` brings the layer up per env: it includes
-`launch/hearing.launch.py` next to the auditory sidecar, merges
-`config/hearing/nav2_overlay.yaml` (a `SpeedFilter` on the local costmap and
-the controller's `speed_limit_topic`) into the robot's Nav2 parameters through
-the nav2 adapter's `params_overlay`, and adds the belief, speed mask and wedge
-displays to the RViz that `arena launch` opens:
+`robot.hearing:=bus|srp|seld` includes `launch/hearing.launch.py` per env and
+merges `config/hearing/nav2_overlay.yaml` (a `SpeedFilter` on the local costmap
+and the controller's `speed_limit_topic`, both below the robot namespace) into
+every robot's Nav2 parameters:
 
-    export ARENA_WORLD_PATH=$ARENA_WS_DIR/src/Arena/_assets/arena-benchmarks-prod-public/suites/acoustics/worlds
-    arena launch sim:=gazebo robot:=jackal world:=acoustics_bend_narrow_O \
-        task.robots:=scenario task.obstacles:=scenario \
-        task.scenario:=hearing__world-acoustics_bend_narrow_O__robot-moving__pedestrians-1__ends-a-to-b \
-        auditory:=arena robot.hearing:=bus
+```bash
+export ARENA_WORLD_PATH=$ARENA_WS_DIR/src/Arena/_assets/arena-benchmarks-prod-public/suites/acoustics/worlds
+arena launch sim:=gazebo robot:=jackal world:=acoustics_bend_narrow_O \
+    task.robots:=scenario task.obstacles:=scenario \
+    task.scenario.file:=hearing__world-acoustics_bend_narrow_O__robot-moving__pedestrians-1__ends-a-to-b \
+    auditory:=arena robot.hearing:=bus
+```
 
-`robot.hearing:=srp` runs the untrained energy-onset + GCC-PHAT front-end, and
-`robot.hearing:=seld` runs the SELDnet front-end, instead of the bus; both
-imply `microphone_mode:=four_mic`. The nodes bind to the robot announced on
-`<tg_node>/state/robots`, so `robot:=auto` works; with several robots per env
-pass `robot:=<name>` to `hearing.launch.py` directly.
+`srp` and `seld` default `auditory.array.spec` to `four_mic`.
+`hearing.launch.py` takes `env.ns`, `tg_node`, `frontend`, `policy` and
+`array.spec` (the renderer's `auditory.array.spec`), and forwards every
+`robot.hearing.<param>:=<value>` to the hearing nodes as parameter `<param>`,
+for example `robot.hearing.seld.device:=cpu` or
+`robot.hearing.belief.tau_s:=3.0`. These keys never reach the robot adapters.
 
-Topics, all under the env namespace `/arena/env_0`:
+Topics below the task generator node `/arena/env_0/task_generator_node`,
+`<r>` is the robot namespace:
 
-| direction | topic | note |
+| Direction | Topic | Note |
 |---|---|---|
-| in | `task_generator_node/jackal/heard_sound` | bus events from `robot_hearing_node`, BEST_EFFORT |
-| in | `task_generator_node/map` | grid geometry, TRANSIENT_LOCAL |
-| in | `task_generator_node/state/resetting` | clears the grid on episode reset |
-| in | `task_generator_node/jackal/plan` | robot's Nav2 global plan, for blind-bend detection |
-| in | tf `map -> env_0/jackal/base_link` | robot pose |
-| out | `hearing/speed_filter_mask` | `OccupancyGrid`, TRANSIENT_LOCAL, written by `hearing_policy`, read by the SpeedFilter |
-| out | `hearing/policy_state` | `std_msgs/String` JSON: state, dist_to_bend_m, frac_ahead, mass_ahead, mass_behind, mass_total, level_slope_db_s, limit_pct, binding_layer, yield_count, time_yielding_s |
-| out | `hearing/policy_markers` | approach lane and hold band |
-| out | `hearing/costmap_filter_info` | from `costmap_filter_info_server`, type 1 (percent) |
-| out | `hearing/speed_limit` | published by Nav2's SpeedFilter, consumed by `controller_server` |
-| out | `hearing/belief_grid`, `hearing/belief_wedges` | RViz |
+| in | `<r>/audio/raw_array` | `AudioFrame`, srp and seld |
+| in | `<r>/hearing/<frontend>/detections` | `AuditoryDetection` |
+| in | `map`, `state/resetting`, `state/robots` | grid geometry, reset, fleet |
+| in | `<r>/plan` | Nav2 global plan, for blind-bend detection |
+| out | `<r>/hearing/belief_grid`, `<r>/hearing/belief_wedges` | RViz |
+| out | `<r>/hearing/speed_filter_mask` | `OccupancyGrid`, latched, read by the robot's SpeedFilter |
+| out | `<r>/hearing/costmap_filter_info` | `CostmapFilterInfo`, latched, points the SpeedFilter at the mask |
+| out | `<r>/hearing/policy_state` | JSON: state, distances, masses, level slope, limit, binding layer, yield count and time |
+| out | `<r>/hearing/policy_markers` | approach lane and hold band |
+| Nav2 | `<r>/hearing/speed_limit` | SpeedFilter to controller |
 
-`source:=srp` and `source:=seld` both start their front-end on
-`task_generator_node/jackal/audio/raw_array` (the renderer's `AudioFrame`,
-16 kHz x 4 ch, interleaved float, which exists only in
-`microphone_mode:=four_mic`) and consume `heard_sound_srp` or
-`heard_sound_seld` respectively, with `bearing_frame: robot` and a 10 Hz
-nominal event rate. The bus is map-frame and 2 Hz (`source:=bus`, the
-default).
+### Belief and policy
 
-### Consumer semantics
+The belief layer of the mask is the belief max-filtered over a disc of
+`policy.reaction_radius_m` (2.0 m) before thresholding. The robot slows from
+`policy.speed_free_pct` (100) to `policy.speed_min_pct` (40) as the belief
+goes from `policy.belief_threshold` (0.6) to 1. A wedge is never narrower
+than `belief.min_half_width_m` (0.3 m). `belief.level_range.enabled` (default
+false) keeps the wedge flat out to `belief.max_range_m`, since walls and doors
+attenuate an occluded pedestrian and the level would place it too far away.
+The emission level per kind is the level of the kind's default asset,
+overridable by `belief.emission_db.<kind>`.
 
-Nav2's `SpeedFilter` reads the mask at the robot's own cell and publishes
-`speed_limit` when it changes. The belief layer of the mask is the belief
-max-filtered over a disc of `reaction_radius_m` (2.0 m) before thresholding:
-the robot is slowed while likely pedestrian mass lies within that radius, from
-`speed_free_pct` (100) down to `speed_min_pct` (40) as the belief goes from
-`belief_threshold` (0.6) to 1, so one footstep does not floor the whole
-corridor. Those four now live in `config/hearing/policy.yaml`, read by
-`hearing_policy`, not on the belief node. The wedge itself is never narrower
-than `min_half_width_m` (0.3 m) so its apex carries full weight.
+`hearing_policy` composes the mask from three layers by lowest nonzero
+percentage: belief, listen (`policy.listen_mps` on the approach to a blind
+bend) and hold (`policy.hold_mps` before the bend while yielding). The robot's
+own drivetrain masks the pedestrian it listens for, and its level grows with
+speed as (v / 1 m/s) to the power `motor.speed_exponent` (1.0).
 
-`use_level_range` (default false) keeps the wedge flat out to `max_range_m`.
-On the bus a wall costs about 7 dB, so an occluded pedestrian sounds twice as
-far as it is; with the level-derived range the bump sits at 15 m and the
-speed limit barely moves before the corner.
-
-### Listen-then-yield
-
-`hearing_policy` composes `hearing/speed_filter_mask` from three layers by
-lowest nonzero percentage (0 stays "no limit" and never wins over an actual
-cap): belief (the dilated, thresholded `hearing/belief_grid`), listen
-(`listen_mps` painted on the approach to a blind bend), and hold (`hold_mps`
-on a short band before the bend while yielding). The extra layers exist
-because the robot's own drivetrain masks the pedestrian it is trying to hear:
-amplitude scales with speed^1 on the Jackal drivetrain, so at 0.5 m/s the
-noise floor masks footsteps beyond about 3 m, and slowing to 0.2 m/s pushes
-that horizon out to about 8 m.
-
-A plan point is blind when the map line from it to the point `lookahead_m`
-further along the plan crosses occupied cells; the bend is the first point
-after that where the line clears again. Bends are map-frame points tracked
-with `bend_hysteresis_m` hysteresis and a consumed latch (`rearm_after_m`), so
-a 1 Hz replan does not re-arm the corner it just cleared.
-
-State machine: cruise, listen once inside `approach_m` of the bend, yield once
-the fraction of total belief mass inside the `corner_radius_m` disc around the
-bend exceeds `yield_fraction`, release to pass once the mass has moved behind
-the robot, faded below `release_fraction`, or the received level has been
-falling for `recede_s` (each only after `min_yield_s` of silence), or
-unconditionally at `yield_timeout_s`. Pass takes the bend at listen speed,
-never full speed, so a pedestrian who yielded in turn is not driven into.
-
-Nav2 reads a 0 % mask as "no limit", so the hold is a `hold_mps` (0.03 m/s)
-creep rather than a stop, three times the progress checker's 0.2 m / 20 s
-threshold.
-
-`robot.hearing.policy:=belief|listen|full` on `arena launch` (`policy` on
-`hearing.launch.py`) picks how many layers are active. Parameters live in
-`config/hearing/policy.yaml`: `listen_mps` 0.2, `hold_mps` 0.03,
-`lookahead_m` 4.0, `approach_m` 4.0, `hold_len_m` 1.5, `hold_offset_m` 1.0,
-`lane_radius_m` 0.6, `corner_radius_m` 2.0, `bend_hysteresis_m` 1.0,
-`rearm_after_m` 3.0, `yield_fraction` 0.5, `release_fraction` 0.25,
-`min_yield_s` 3.0, `yield_timeout_s` 15.0, `recede_s` 2.0.
-
-v1 has no approach-versus-recede estimate beyond the level trend: presence
-near the bend yields regardless of whether the source is closing or
-receding.
+A plan point is blind when at least 25 % of the free cells within 2 m of the
+point `policy.lookahead_m` further along the plan, on its far side, are hidden
+from it by occupied cells. The bend is the first point from which that clears,
+or the plan end when the plan ends blind. Only blind stretches that start
+within `policy.approach_m` plus `policy.lookahead_m` are searched. States: cruise, listen inside `policy.approach_m`,
+yield once the belief mass within `policy.corner_radius_m` of the bend exceeds
+`policy.yield_fraction`, and pass once the mass moved behind the robot, faded
+below `policy.release_fraction`, or the level fell for `policy.recede_s`
+(each after `policy.min_yield_s`), or at `policy.yield_timeout_s`. Pass takes
+the bend at listen speed. Nav2 reads 0 % as no limit, so the hold is a
+0.03 m/s creep. `robot.hearing.policy:=belief|listen|full` picks the active
+layers.
 
 ### Evaluation
 
-The arms are benchmark contestants, `contests/hearing.yaml` in arena_evaluation,
-run against the `acoustics` suite from the benchmark bucket:
+The arms are contestants of `contests/hearing.yaml` in arena_evaluation, run
+against the `acoustics` suite:
 
-    arena evaluation benchmark --suite acoustics --contest hearing
+```bash
+arena evaluation benchmark --suite acoustics --contest hearing
+```
 
-`yield_count` and `time_yielding_s` on `hearing/policy_state` are cumulative
-per env, so a metric over the recording differences them per episode.
+`yield_count` and `time_yielding_s` on `<r>/hearing/policy_state` are
+cumulative per robot. `python3 tools/replay_belief.py EPISODE_DIR` (from a source checkout) replays an exported episode
+through the belief grid offline, from SELDnet detections or the ground-truth
+labels.
 
 ### Front-end checks
 
-    ros2 run arena_auditory hearing_seld_frontend --ros-args -r __ns:=/hearing_test
-    ros2 run arena_auditory hearing_audio_replay <4ch.wav> --topic /hearing_test/audio/raw_array
+```bash
+ros2 run arena_auditory hearing_audio_replay <4ch.wav> <robot> --array four_mic --ros-args -r __ns:=/arena/env_0
+```
 
-`hearing.seld.SeldFrontend.events_from_wav` reproduces the DCASE per-file output
-(410/410 detections on the test clip, azimuths within 1e-5 deg, cuDNN noise).
-The streaming path re-runs the model on a 5 s sliding window once per 100 ms
-label frame and emits the frame `lookahead_frames` (default 5) before the
-window end, since the model is not causal.
+`hearing_audio_replay` publishes every channel of the wav on
+`<tg>/<robot>/audio/raw_array`, `--array` declares the geometry the
+front-ends need. A front-end picks the robot up from `state/robots`.
 
-The model supplies detection and class. The bearing comes from
-`bearing_source`: `gcc` (default) fits the known array geometry to GCC-PHAT
-delays over the six mic pairs of the detection frame (`hearing/doa.py`), `seld`
-takes the model's azimuth. The shipped checkpoint's DOA head is front-biased:
-on the stock footstep rendered through the sim array at 3 m, sources at 0 and
-45 deg come back near 12 and 35 deg, but 90 deg left comes back near 2 deg,
-270 deg right near -34 deg, and a source directly behind puts a tenth of its
-detections within 10 deg of straight ahead. The fit is within 2 deg everywhere
-on the same clips (`tests/unit/test_seld_bearing.py`, the checkpoint half runs
-when the weights are fetched). With two simultaneous sources the fit follows the
-louder one, which is the one thing the model could in principle do better.
+The streaming SELDnet path re-runs the model on a 5 s sliding window once per
+100 ms label frame and emits the frame `seld.lookahead_frames` (default 5)
+before the window end. The bearing comes from `seld.bearing_source`: `gcc`
+(default) fits the array geometry to GCC-PHAT delays over every microphone
+pair, `seld` takes the model azimuth, which is front-biased on the shipped
+checkpoint.
 
 ### Weights
 
-The front-end needs two files, declared in `weights.yaml` with sha256 pins:
-the checkpoint (`.h5`, 5.3 MB) and the feature scaler (`scaler.npz`, mean and
-scale per feature bin, fitted on the checkpoint's training split, so the two
-only make sense together). They live on Hugging Face and land in
+The SELDnet checkpoint and feature scaler are pinned with sha256 in
+`config/weights.yaml`, hosted on Hugging Face and stored in
 `$ARENA_DATA_DIR/auditory/seld/`:
 
-    ros2 run arena_auditory hearing_setup
+```bash
+ros2 run arena_auditory hearing_setup
+```
 
-The front-end node fetches them itself on first use when they are missing.
-The model architecture, SALSA-Lite feature extraction and multi-ACCDOA decode
-are in `hearing/dcase.py`, adapted from the DCASE 2023 SELD baseline
-(MIT), so no checkout of that repository is needed at runtime.
+The front-end fetches them on first use when they are missing. The model,
+SALSA-Lite features and multi-ACCDOA decode are in `hearing/dcase.py`, adapted
+from the DCASE 2023 SELD baseline (MIT).
+
+## Tests
+
+```bash
+python3 -m pytest arena_auditory/tests/unit -q
+python3 -m pytest arena_auditory/tests/ros/test_sound_event.py -q
+```
+
+The ROS round trip publishes a speech `SoundEvent`, expects a reception for
+`robot:<r>`, the republished `<r>/heard_sound` and its text marker.
+
+## Configuration
+
+| File | Content |
+|---|---|
+| `config/sounds.yaml` | kinds table |
+| `config/arrays/*.yaml` | microphone array presets |
+| `config/acoustic_materials.yaml` | absorption and floor damping per material |
+| `config/weights.yaml` | SELDnet weights and pins |
+| `config/hearing/nav2_overlay.yaml` | Nav2 SpeedFilter overlay |
+| `arena_auditory/params.py` | every node parameter and default |
+| `task_generator/launch/auditory/` (Arena) | axis dispatch and the shim into `launch/arena_auditory.launch.py` |
+| `task_generator/task_generator/simulators/auditory/` (Arena) | node-side axis, the single gateway into this package |

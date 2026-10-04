@@ -1,0 +1,11 @@
+<library path="arena_auditory_viz">
+    <class type="arena_auditory_viz::AuditoryPanel" base_class_type="rviz_common::Panel">
+      <description>Propagation, workstation playback, listener routing, microphone array, motor tuning, and environment sound sources of the auditory runtime.</description>
+    </class>
+    <class type="arena_auditory_viz::SpawnMicrophoneTool" base_class_type="rviz_common::Tool">
+      <description>Click to spawn an indexed acoustic microphone via runtime/spawn_microphone.</description>
+    </class>
+    <class type="arena_auditory_viz::SpawnSoundTool" base_class_type="rviz_common::Tool">
+      <description>Click and drag to spawn an environment sound source of a chosen kind via runtime/spawn_sound.</description>
+    </class>
+</library>

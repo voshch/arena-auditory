@@ -1,0 +1,40 @@
+from __future__ import annotations
+
+from arena_auditory.render.clock import RenderCursor
+
+BLOCK = 20_000_000
+
+
+def test_first_call_anchors_and_owes_one_block() -> None:
+    cursor = RenderCursor(block_ns=BLOCK, max_catchup=10)
+    assert cursor.owed(5_000_000_000) == (1, 0)
+    assert cursor.start_ns == 5_000_000_000
+
+
+def test_no_new_block_before_period_elapses() -> None:
+    cursor = RenderCursor(block_ns=BLOCK, max_catchup=10)
+    cursor.owed(0)
+    assert cursor.owed(BLOCK - 1) == (0, 0)
+    assert cursor.owed(BLOCK) == (1, 0)
+
+
+def test_catch_up_within_cap() -> None:
+    cursor = RenderCursor(block_ns=BLOCK, max_catchup=10)
+    cursor.owed(0)
+    assert cursor.owed(4 * BLOCK) == (4, 0)
+    assert cursor.rendered == 5
+
+
+def test_skip_past_cap() -> None:
+    cursor = RenderCursor(block_ns=BLOCK, max_catchup=10)
+    cursor.owed(0)
+    assert cursor.owed(25 * BLOCK) == (10, 15)
+    assert cursor.skipped == 15
+    assert cursor.owed(25 * BLOCK) == (0, 0)
+    assert cursor.owed(26 * BLOCK) == (1, 0)
+
+
+def test_clock_going_backwards_owes_nothing() -> None:
+    cursor = RenderCursor(block_ns=BLOCK, max_catchup=10)
+    cursor.owed(3 * BLOCK)
+    assert cursor.owed(0) == (0, 0)

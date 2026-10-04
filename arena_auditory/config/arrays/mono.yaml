@@ -1,0 +1,6 @@
+name: mono
+sample_rate_hz: 44100
+block_size: 512
+sensitivity_dbfs_at_94_dbspl: -26.0
+mics:
+  - {name: mono, position_m: [0.0, 0.0, 0.0], side: center}
