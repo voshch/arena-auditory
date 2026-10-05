@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pyarrow.parquet as pq
+import pytest
 from arena_auditory.dataset.export_recording import (
     AUDIO_TOPIC,
     PCM_F32LE,
@@ -20,6 +21,7 @@ from arena_auditory.dataset.export_recording import (
     build_rendered_activity_intervals,
     clip_audio_chunks,
     occupancy_ray_labels,
+    read_mcap,
     select_map_snapshot,
     transform_robot_trajectory,
     write_csv,
@@ -310,7 +312,7 @@ def test_agent_states_are_human_source_pose_samples_in_map_frame():
         policy="",
     )
 
-    decoded = _agent_states_pedestrians(SimpleNamespace(header=header, agents=[human, robot]), "/arena/env_0/agent_states", 1)
+    decoded = _agent_states_pedestrians(SimpleNamespace(header=header, agents=[human, robot]), "arena_humansim_msgs/msg/AgentStates", "/arena/env_0/agent_states", 1)
 
     assert list(decoded) == ["agent_12"]
     row = decoded["agent_12"][0]
@@ -318,6 +320,89 @@ def test_agent_states_are_human_source_pose_samples_in_map_frame():
     assert row["frame_id"] == "map"
     assert row["yaw"] == 0.75
     assert row["state_source"] == "agent_states"
+
+
+def test_agent_frame_resolves_policies_by_index_in_map_frame():
+    header = SimpleNamespace(stamp=SimpleNamespace(sec=7, nanosec=25), frame_id="")
+    frame = SimpleNamespace(
+        header=header,
+        agent_id=[12, 99, 13, 14],
+        x=[1.5, 0.0, 2.0, 3.0],
+        y=[-2.0, 0.0, 1.0, 1.0],
+        theta=[0.75, 0.0, 0.0, 0.0],
+        vx=[0.3, 0.0, 0.0, 0.0],
+        vy=[0.4, 0.0, 0.0, 0.0],
+        desired_velocity=[1.2, 0.0, 1.0, 1.0],
+        radius=[0.35, 0.4, 0.3, 0.3],
+        kind=bytes([0, 1, 0, 0]),
+        policy_idx=[1, 0, -1, 5],
+    )
+
+    decoded = _agent_states_pedestrians(frame, "arena_humansim_msgs/msg/AgentFrame", "/arena/env_0/agent_states", 1, ["orca", "social_force"])
+
+    assert list(decoded) == ["agent_12", "agent_13", "agent_14"]
+    row = decoded["agent_12"][0]
+    assert row["timestamp_ns"] == 7_000_000_025
+    assert row["frame_id"] == "map"
+    assert (row["x"], row["y"], row["yaw"], row["vx"], row["vy"], row["vz"]) == (1.5, -2.0, 0.75, 0.3, 0.4, 0.0)
+    assert (row["radius"], row["desired_velocity"], row["agent_type"]) == (0.35, 1.2, "")
+    assert [decoded[key][0]["policy"] for key in decoded] == ["social_force", "", ""]
+
+
+# (agent_id, kind, x, y, theta, vx, vy, radius, desired_velocity, policy)
+_RECORDED_AGENTS = [
+    (12, 0, 1.5, -2.0, 0.75, 0.3, 0.4, 0.35, 1.2, "social_force"),
+    (99, 1, 4.0, 4.0, 0.0, 1.0, 0.0, 0.4, 0.0, "orca"),
+    (13, 0, -0.5, 3.25, -1.5, -0.2, 0.1, 0.3, 1.0, ""),
+]
+_STATES_TOPIC = "/arena/env_0/task_generator_node/agent_states"
+
+
+def _record_mcap(directory: Path, messages: list[tuple[str, str, object, int]]) -> Path:
+    rosbag2_py = pytest.importorskip("rosbag2_py")
+    from rclpy.serialization import serialize_message
+
+    writer = rosbag2_py.SequentialWriter()
+    writer.open(rosbag2_py.StorageOptions(uri=str(directory), storage_id="mcap"), rosbag2_py.ConverterOptions(input_serialization_format="cdr", output_serialization_format="cdr"))
+    for index, (topic, type_name) in enumerate(dict.fromkeys((topic, type_name) for topic, type_name, _, _ in messages)):
+        writer.create_topic(rosbag2_py.TopicMetadata(index, topic, type_name, "cdr"))
+    for topic, _, message, log_time in messages:
+        writer.write(topic, serialize_message(message), log_time)
+    writer.close()
+    return next(directory.glob("*.mcap"))
+
+
+def test_read_mcap_agent_states_and_agent_frame_layouts_export_identical_pedestrians(tmp_path: Path) -> None:
+    msgs = pytest.importorskip("arena_humansim_msgs.msg")
+    nested = msgs.AgentStates()
+    nested.header.stamp.sec = 3
+    for agent_id, kind, x, y, theta, vx, vy, radius, desired_velocity, policy in _RECORDED_AGENTS:
+        agent = msgs.AgentState(agent_id=agent_id, kind=kind, radius=radius, desired_velocity=desired_velocity, policy=policy)
+        agent.pose.x, agent.pose.y, agent.pose.theta = x, y, theta
+        agent.velocity.x, agent.velocity.y = vx, vy
+        nested.agents.append(agent)
+    meta = msgs.AgentMeta(policies=["orca", "social_force"], agent_id=[12, 99, 13], name=["alice", "", ""], handedness=["", "", "l"])
+    flat = msgs.AgentFrame()
+    flat.header.stamp.sec = 3
+    flat.agent_id, flat.kind, flat.x, flat.y, flat.theta, flat.vx, flat.vy, flat.radius, flat.desired_velocity, policy_names = (list(column) for column in zip(*_RECORDED_AGENTS, strict=True))
+    flat.policy_idx = [meta.policies.index(name) if name else -1 for name in policy_names]
+
+    old = read_mcap(_record_mcap(tmp_path / "nested", [(_STATES_TOPIC, "arena_humansim_msgs/msg/AgentStates", nested, 2)]))
+    new = read_mcap(
+        _record_mcap(
+            tmp_path / "flat",
+            [
+                ("/arena/env_0/task_generator_node/agent_meta", "arena_humansim_msgs/msg/AgentMeta", meta, 1),
+                (_STATES_TOPIC, "arena_humansim_msgs/msg/AgentFrame", flat, 2),
+            ],
+        )
+    )
+
+    assert old["pedestrians"] == new["pedestrians"]
+    assert list(new["pedestrians"]) == ["agent_12", "agent_13"]
+    assert [rows[0]["policy"] for rows in new["pedestrians"].values()] == ["social_force", ""]
+    assert new["pedestrians"]["agent_12"][0]["frame_id"] == "map"
+    assert new["pedestrian_state_source"] == old["pedestrian_state_source"] == "agent_states"
 
 
 def test_arena_pedestrians_are_enriched_from_agent_states_by_shared_id():

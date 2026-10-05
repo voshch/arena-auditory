@@ -93,6 +93,20 @@ class AgentStatesLike(Protocol):
     agents: Iterable[AgentStateLike]
 
 
+class AgentFrameLike(Protocol):
+    header: HeaderWithFrameLike
+    agent_id: Sequence[int]
+    x: Sequence[float]
+    y: Sequence[float]
+    theta: Sequence[float]
+    vx: Sequence[float]
+    vy: Sequence[float]
+    desired_velocity: Sequence[float]
+    radius: Sequence[float]
+    kind: bytes
+    policy_idx: Sequence[int]
+
+
 @dataclass(frozen=True)
 class AudioBlock:
     topic: str
@@ -304,43 +318,49 @@ def _header_time_or_log_time(msg: HeaderMessageLike, log_time: int) -> int:
 
 
 def _agent_states_pedestrians(
-    message: AgentStatesLike,
+    message: AgentStatesLike | AgentFrameLike,
+    schema: str,
     topic: str,
     log_time: int,
+    policies: Sequence[str] = (),
 ) -> dict[str, list[dict[str, Any]]]:
-    """Pedestrian samples from HumanSim's batched AgentStates, map frame when frame_id is empty, robots skipped."""
+    """Pedestrian samples from HumanSim's AgentStates or AgentFrame (policies from AgentMeta), map frame when frame_id is empty, robots skipped."""
     timestamp_ns = _header_time_or_log_time(message, log_time)
     frame_id = str(message.header.frame_id).strip() or "map"
+    if schema == "arena_humansim_msgs/msg/AgentFrame":
+        humans = np.frombuffer(message.kind, dtype=np.uint8) == 0
+        ids = np.asarray(message.agent_id, dtype=np.int64)[humans].tolist()
+        xs, ys, thetas, vxs, vys, radii, desired = (np.asarray(column, dtype=np.float64)[humans].tolist() for column in (message.x, message.y, message.theta, message.vx, message.vy, message.radius, message.desired_velocity))
+        names = [policies[index] if 0 <= index < len(policies) else "" for index in np.asarray(message.policy_idx, dtype=np.int64)[humans].tolist()]
+        agents = zip(ids, xs, ys, thetas, vxs, vys, [0.0] * len(ids), radii, desired, [""] * len(ids), names, strict=True)
+    else:
+        agents = ((agent.agent_id, agent.pose.x, agent.pose.y, agent.pose.theta, agent.velocity.x, agent.velocity.y, agent.velocity.z, agent.radius, agent.desired_velocity, agent.agent_type, agent.policy) for agent in message.agents if int(agent.kind) == 0)
     pedestrians: dict[str, list[dict[str, Any]]] = {}
-    for agent in message.agents:
-        if int(agent.kind) != 0:
-            continue
-        agent_id = int(agent.agent_id)
-        agent_type = str(agent.agent_type)
-        policy = str(agent.policy)
+    for raw_id, x, y, theta, vx, vy, vz, radius, desired_velocity, agent_type, policy in agents:
+        agent_id = int(raw_id)
         key = f"agent_{agent_id}"
         pedestrians.setdefault(key, []).append(
             {
                 "timestamp_ns": timestamp_ns,
                 "pedestrian_id": agent_id,
                 "pedestrian_name": key,
-                "x": float(agent.pose.x),
-                "y": float(agent.pose.y),
+                "x": float(x),
+                "y": float(y),
                 "z": 0.0,
-                "yaw": float(agent.pose.theta),
+                "yaw": float(theta),
                 "qx": 0.0,
                 "qy": 0.0,
-                "qz": math.sin(float(agent.pose.theta) / 2.0),
-                "qw": math.cos(float(agent.pose.theta) / 2.0),
-                "vx": float(agent.velocity.x),
-                "vy": float(agent.velocity.y),
-                "vz": float(agent.velocity.z),
+                "qz": math.sin(float(theta) / 2.0),
+                "qw": math.cos(float(theta) / 2.0),
+                "vx": float(vx),
+                "vy": float(vy),
+                "vz": float(vz),
                 "animation_state": None,
                 "model_uri": "",
-                "radius": float(agent.radius),
-                "desired_velocity": float(agent.desired_velocity),
-                "agent_type": agent_type,
-                "policy": policy,
+                "radius": float(radius),
+                "desired_velocity": float(desired_velocity),
+                "agent_type": str(agent_type),
+                "policy": str(policy),
                 "state_source": "agent_states",
                 "state_source_topic": topic,
                 "topic": topic,
@@ -395,6 +415,7 @@ def read_mcap(path: Path) -> dict[str, Any]:
     odom: dict[str, list[dict[str, Any]]] = {}
     arena_pedestrians: dict[str, list[dict[str, Any]]] = {}
     agent_state_pedestrians: dict[str, list[dict[str, Any]]] = {}
+    agent_policies: dict[str, list[str]] = {}
     maps: dict[str, list[dict[str, Any]]] = {"map": [], "door_mask": []}
     transforms: dict[tuple[str, str], list[dict[str, Any]]] = {}
     clocks: list[int] = []
@@ -525,8 +546,10 @@ def read_mcap(path: Path) -> dict[str, Any]:
                             "frame_id": str(ros_msg.header.frame_id),
                         }
                     )
+            elif topic.endswith("/agent_meta"):
+                agent_policies[topic.removesuffix("/agent_meta")] = list(ros_msg.policies)
             elif topic.endswith("/agent_states"):
-                decoded = _agent_states_pedestrians(ros_msg, topic, message.log_time)
+                decoded = _agent_states_pedestrians(ros_msg, schema.name, topic, message.log_time, agent_policies.get(topic.removesuffix("/agent_states"), ()))
                 for key, rows in decoded.items():
                     agent_state_pedestrians.setdefault(key, []).extend(rows)
             elif topic.endswith(f"/{SOUND_EVENTS}"):
