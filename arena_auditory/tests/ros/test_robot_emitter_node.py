@@ -188,10 +188,10 @@ def test_motor_sound_publishes_cone_and_clears_it(robot_emitter) -> None:
     received: list[MarkerArray] = []
     consumer.create_subscription(MarkerArray, marker_topic, received.append, reliable(10))
     robot = motor._robots["robot1"]
-    assert robot.marker_publisher.topic_name == marker_topic
+    assert robot.marker_publisher.publisher.topic_name == marker_topic
     assert robot.binding.base_frame == base_frame
     assert f"{namespace}/robot1/odom" in robot.binding.odom_topics
-    _spin_until(rclpy, [motor, consumer], lambda: robot.marker_publisher.get_subscription_count() > 0)
+    _spin_until(rclpy, [motor, consumer], lambda: robot.marker_publisher.wanted)
 
     def actions(action: int) -> list[Marker]:
         return [marker for message in received for marker in message.markers if marker.action == action]

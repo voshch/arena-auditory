@@ -171,19 +171,20 @@ Names below the task generator node, `<r>` is a robot name:
 | `microphone_listeners` | `std_msgs/String` JSON list, latched | propagation |
 | `microphone_markers` | `MarkerArray` | propagation |
 | `<r>/audio/raw_array` | `AudioFrame` | `array_renderer` |
-| `<r>/audio/stem_motor`, `stem_pedestrian`, `stem_ambient` | `AudioFrame` | `array_renderer` |
-| `<r>/audio/headphones/stereo` | `AudioFrame` | `array_renderer` |
+| `<r>/audio/stem_motor`, `stem_pedestrian`, `stem_ambient` | `AudioFrame` | `array_renderer`, only while subscribed |
+| `<r>/audio/headphones/stereo` | `AudioFrame` | `array_renderer`, only while subscribed |
 | `<r>/audio/hearing/mono` | `AudioFrame` | `array_renderer`, only while subscribed |
 | `<r>/audio/hearing/energy` | `std_msgs/Float32MultiArray` | `array_renderer`, only while subscribed |
 | `<r>/audio/diagnostics/tdoa` | `std_msgs/String` JSON | `array_renderer`, only while subscribed |
 | `<r>/audio/diagnostics/levels` | `MarkerArray`, per-microphone dBFS text in the mount frame | `array_renderer`, only while subscribed |
-| `<r>/audio/diagnostics/render_inputs` | `std_msgs/String` JSON | `array_renderer` |
+| `<r>/audio/diagnostics/render_inputs` | `std_msgs/String` JSON | `array_renderer`, only while subscribed |
 | `<r>/audio/rendered_sound_activity` | `RenderedSoundActivity` | `array_renderer` |
 | `audio/listener/monitor` | `AudioFrame` | `listener_renderer`, only while subscribed |
-| `<r>/heard_sound`, `<r>/heard_sound_marker` | `HeardSoundEvent`, `Marker` | `robot_hearing_node` |
+| `<r>/heard_sound`, `<r>/heard_sound_marker` | `HeardSoundEvent`, `Marker` | `robot_hearing_node`, the marker only while subscribed |
 | `<r>/hearing/<frontend>/detections` | `AuditoryDetection` | `robot_hearing_node` (bus), srp and seld front-ends |
-| `<r>/motor_sound_markers` | `MarkerArray` | `robot_emitter` |
-| `pedestrian_sound_propagation_markers`, `robot_sound_propagation_markers`, `acoustic_room_markers`, `environment_audio_source_markers` | `MarkerArray` | visualizer |
+| `<r>/motor_sound_markers` | `MarkerArray` | `robot_emitter`, only while subscribed |
+| `pedestrian_sound_propagation_markers`, `robot_sound_propagation_markers` | `MarkerArray` | visualizer, only while subscribed |
+| `acoustic_room_markers`, `environment_audio_source_markers` | `MarkerArray`, latched | visualizer |
 
 `<env ns>/pedestrian_markers/extra` carries the pedestrian footstep and speech
 cones. The hearing topics live below the env namespace, see
@@ -606,11 +607,11 @@ Topics below the task generator node `/arena/env_0/task_generator_node`,
 | in | `<r>/hearing/<frontend>/detections` | `AuditoryDetection` |
 | in | `map`, `state/resetting`, `state/robots` | grid geometry, reset, fleet |
 | in | `<r>/plan` | Nav2 global plan, for blind-bend detection |
-| out | `<r>/hearing/belief_grid`, `<r>/hearing/belief_wedges` | RViz |
+| out | `<r>/hearing/belief_grid`, `<r>/hearing/belief_wedges` | RViz, the wedges only while subscribed |
 | out | `<r>/hearing/speed_filter_mask` | `OccupancyGrid`, latched, read by the robot's SpeedFilter |
 | out | `<r>/hearing/costmap_filter_info` | `CostmapFilterInfo`, latched, points the SpeedFilter at the mask |
 | out | `<r>/hearing/policy_state` | JSON: state, distances, masses, level slope, limit, binding layer, yield count and time |
-| out | `<r>/hearing/policy_markers` | approach lane and hold band |
+| out | `<r>/hearing/policy_markers` | approach lane and hold band, only while subscribed |
 | Nav2 | `<r>/hearing/speed_limit` | SpeedFilter to controller |
 
 ### Belief and policy

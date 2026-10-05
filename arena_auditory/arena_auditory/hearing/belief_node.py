@@ -32,6 +32,7 @@ import numpy as np
 import tf2_ros
 from arena_auditory_msgs.msg import AuditoryDetection
 from arena_rclpy_mixins import ArenaMixinNode, qos
+from arena_rclpy_mixins.lazy import LazyPublisher
 from arena_runtime_msgs.msg import LockstepChannel
 from builtin_interfaces.msg import Time as TimeMsg
 from geometry_msgs.msg import Point, Quaternion
@@ -89,7 +90,7 @@ class _Layout:
 class _Robot:
     binding: RobotBinding
     pub_belief: Publisher
-    pub_markers: Publisher | None
+    pub_markers: LazyPublisher[MarkerArray] | None
     sub: Subscription = attrs.field(init=False)
     grid: BeliefGrid | None = None
     wedges: deque[_Wedge] = attrs.Factory(deque)
@@ -137,7 +138,7 @@ class BeliefNode(ArenaMixinNode):
         robot = _Robot(
             binding=binding,
             pub_belief=self.create_publisher(OccupancyGrid, f"{self._tg}/{binding.name}/{BELIEF_GRID}", qos.reliable(1)),
-            pub_markers=self.create_publisher(MarkerArray, f"{self._tg}/{binding.name}/{BELIEF_WEDGES}", qos.reliable(1)) if self._markers_enabled else None,
+            pub_markers=LazyPublisher(self.create_publisher(MarkerArray, f"{self._tg}/{binding.name}/{BELIEF_WEDGES}", qos.reliable(1))) if self._markers_enabled else None,
             grid=self._new_grid(),
         )
         robot.sub = self.create_subscription(AuditoryDetection, f"{self._tg}/{detections(binding.name, self._frontend)}", functools.partial(self._cb_detection, robot), qos.reliable(50))
@@ -148,7 +149,7 @@ class BeliefNode(ArenaMixinNode):
         self.destroy_subscription(robot.sub)
         self.destroy_publisher(robot.pub_belief)
         if robot.pub_markers is not None:
-            self.destroy_publisher(robot.pub_markers)
+            self.destroy_publisher(robot.pub_markers.publisher)
 
     def _channel(self, robot: _Robot) -> LockstepChannel:
         return LockstepChannel(name=f"belief/{robot.binding.name}", topic=robot.pub_belief.topic_name, type="nav_msgs/msg/OccupancyGrid", period_s=1.1 / self._rate, hard=True)
@@ -282,7 +283,9 @@ class BeliefNode(ArenaMixinNode):
             robot.grid.decay(dt)
             robot.pub_belief.publish(self._as_grid(robot.grid, stamp, frame))
             if robot.pub_markers is not None:
-                robot.pub_markers.publish(self._wedge_markers(robot, now.nanoseconds, stamp, frame))
+                self._retire_wedges(robot, now.nanoseconds)
+                if not robot.pub_markers.publish(lambda robot=robot: self._wedge_markers(robot, now.nanoseconds, stamp, frame)):
+                    robot.retired.clear()
 
     @staticmethod
     def _as_grid(grid: BeliefGrid, stamp: TimeMsg, frame: str) -> OccupancyGrid:
@@ -303,14 +306,17 @@ class BeliefNode(ArenaMixinNode):
         r, g, b = entry.color if entry is not None else DEFAULT_WEDGE_COLOR
         return ColorRGBA(r=float(r), g=float(g), b=float(b), a=alpha)
 
+    def _retire_wedges(self, robot: _Robot, now_ns: int) -> None:
+        tau = max(float(self._config.tau_s), 1e-6)
+        keep = max(self.conf.Belief.MARKERS_MAX_COUNT.value, 1)
+        while robot.wedges and ((now_ns - robot.wedges[0].t_ns) * 1e-9 > WEDGE_EXPIRE_TAU * tau or len(robot.wedges) > keep):
+            robot.retired.append(robot.wedges.popleft().id)
+
     def _wedge_markers(self, robot: _Robot, now_ns: int, stamp: TimeMsg, frame: str) -> MarkerArray:
         """Every live wedge under a stable id, faded by exp(-age / tau), DELETE for the ones that expired."""
         arr = MarkerArray()
         tau = max(float(self._config.tau_s), 1e-6)
         half = math.radians(float(self._config.wedge_deg)) * 0.5
-        keep = max(self.conf.Belief.MARKERS_MAX_COUNT.value, 1)
-        while robot.wedges and ((now_ns - robot.wedges[0].t_ns) * 1e-9 > WEDGE_EXPIRE_TAU * tau or len(robot.wedges) > keep):
-            robot.retired.append(robot.wedges.popleft().id)
         draw_range = self.conf.Belief.MARKERS_RANGE_M.value
         for wid in robot.retired:
             m = Marker()

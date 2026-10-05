@@ -191,7 +191,7 @@ def test_auditory_round_trip_greeting_reaches_robot_marker(rclpy_context, loop) 
         scene.spin_until(
             lambda: "robot1" in bus._robots
             and bus._robots["robot1"].heard.get_subscription_count() > 0
-            and bus._robots["robot1"].markers.get_subscription_count() > 0
+            and bus._robots["robot1"].markers.wanted
             and emitter._sound_publisher.get_subscription_count() > 0
             and peds_pub.get_subscription_count() > 0,
         )

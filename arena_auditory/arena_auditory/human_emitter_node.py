@@ -9,6 +9,7 @@ import math
 from arena_auditory_msgs.msg import SoundEvent
 from arena_people_msgs.msg import Pedestrian, Pedestrians
 from arena_rclpy_mixins import ArenaMixinNode
+from arena_rclpy_mixins.lazy import LazyPublisher
 from arena_rclpy_mixins.qos import reliable
 from arena_simulation_setup.utils.geometry import Orientation
 from builtin_interfaces.msg import Duration, Time
@@ -66,7 +67,7 @@ class HumanEmitterNode(ArenaMixinNode):
             greeting_cooldown_s=human.GREETING_COOLDOWN_S.value,
         )
         self._sound_publisher = self.create_publisher(SoundEvent, SOUND_EVENTS, reliable(50))
-        self._marker_publisher = self.create_publisher(MarkerArray, env_topic(env_ns, PEDESTRIAN_MARKERS_EXTRA), reliable(10))
+        self._marker_publisher: LazyPublisher[MarkerArray] = LazyPublisher(self.create_publisher(MarkerArray, env_topic(env_ns, PEDESTRIAN_MARKERS_EXTRA), reliable(10)))
         self.create_subscription(Pedestrians, env_topic(env_ns, ARENA_PEDS), self._on_pedestrians, 10)
 
     def destroy_node(self) -> bool:
@@ -132,10 +133,9 @@ class HumanEmitterNode(ArenaMixinNode):
         msg.header.stamp = stamp
         msg.header.frame_id = FRAME
         self._sound_publisher.publish(msg)
-        if self._marker_publisher.get_subscription_count() > 0:
-            self._publish_cone(kind_name, kind.color, ped, stamp)
+        self._marker_publisher.publish(lambda: self._cone(kind_name, kind.color, ped, stamp))
 
-    def _publish_cone(self, kind_name: str, color: tuple[float, float, float], ped: PedestrianState, stamp: Time) -> None:
+    def _cone(self, kind_name: str, color: tuple[float, float, float], ped: PedestrianState, stamp: Time) -> MarkerArray:
         yaw = ped.yaw_rad
         source_x, source_y = ped.position[0], ped.position[1]
         apex = Point(x=source_x + math.cos(yaw) * 0.15, y=source_y + math.sin(yaw) * 0.15, z=MARKER_Z_M)
@@ -169,7 +169,7 @@ class HumanEmitterNode(ArenaMixinNode):
         outline.lifetime = MARKER_LIFETIME
         outline.color = ColorRGBA(r=r, g=g, b=b, a=0.95)
         outline.points = [apex, *arc, apex]
-        self._marker_publisher.publish(MarkerArray(markers=[fill, outline]))
+        return MarkerArray(markers=[fill, outline])
 
 
 def main() -> None:

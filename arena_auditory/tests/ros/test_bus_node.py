@@ -127,7 +127,7 @@ def bus(rclpy_context, loop):
     _spin_until(
         rclpy,
         [node, consumer],
-        lambda: outputs.heard.get_subscription_count() > 0 and outputs.detections.get_subscription_count() > 0 and outputs.markers.get_subscription_count() > 0,
+        lambda: outputs.heard.get_subscription_count() > 0 and outputs.detections.get_subscription_count() > 0 and outputs.markers.wanted,
     )
     try:
         yield node, consumer, suffix, heard, found, markers

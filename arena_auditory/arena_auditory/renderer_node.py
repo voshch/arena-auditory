@@ -27,6 +27,7 @@ from arena_auditory_msgs.msg import (
     SoundSource,
 )
 from arena_rclpy_mixins import ArenaMixinNode
+from arena_rclpy_mixins.lazy import LazyPublisher
 from arena_rclpy_mixins.qos import best_effort, latched, reliable
 from arena_rclpy_mixins.Time import Time
 from arena_runtime.lockstep import register_channels
@@ -82,6 +83,7 @@ CONTINUOUS_QOS = best_effort(64)
 METADATA_QOS = latched(1)
 IMPULSE_QOS = latched(256)
 AUDIO_QOS = reliable(10)
+LAZY_STREAMS = (ArrayStream.STEM_MOTOR, ArrayStream.STEM_PEDESTRIAN, ArrayStream.STEM_AMBIENT, ArrayStream.MONITOR, ArrayStream.HEARING_MONO, ArrayStream.ENERGY, ArrayStream.TDOA, ArrayStream.RENDER_INPUTS, ArrayStream.LEVELS)
 
 LISTENER_SPEC = "mono"
 AUDIO_FRAME_TYPE = "arena_auditory_msgs/msg/AudioFrame"
@@ -146,6 +148,7 @@ class RenderTarget:
     last_levels: np.ndarray
     binding: RobotBinding | None = None
     publishers: dict[ArrayStream, Publisher] = field(default_factory=dict)
+    lazy: dict[ArrayStream, LazyPublisher] = field(default_factory=dict)
     pending_clips: list[ClipInput] = field(default_factory=list)
     reset_pending: bool = False
     event_loads: dict[str, EventLoad] = field(default_factory=dict)
@@ -237,7 +240,7 @@ class RendererNode(ArenaMixinNode):
         self._output_degraded = False
         self._reported_underflows = 0
         self._reported_overflows = 0
-        self._listener_pub: Publisher | None = None
+        self._listener_pub: LazyPublisher[AudioFrame] | None = None
 
         self.create_subscription(HeardSoundEvent, HEARD_SOUND_EVENTS, self._on_heard, EVENT_QOS)
         self.create_subscription(ContinuousHeardSoundState, CONTINUOUS_HEARD_SOUNDS, self._on_continuous, CONTINUOUS_QOS)
@@ -257,7 +260,7 @@ class RendererNode(ArenaMixinNode):
             self.create_subscription(RobotFleet, STATE_ROBOTS, self._on_fleet, METADATA_QOS)
         else:
             self._targets[""] = self._new_target("")
-            self._listener_pub = self.create_publisher(AudioFrame, LISTENER_MONITOR, AUDIO_QOS)
+            self._listener_pub = LazyPublisher(self.create_publisher(AudioFrame, LISTENER_MONITOR, AUDIO_QOS))
             self.add_param_callback(self._listener_conf.ID.name, self._on_listener_id)
             self._streaming = True
             if not self._sim_time:
@@ -344,6 +347,7 @@ class RendererNode(ArenaMixinNode):
         target.publishers[ArrayStream.TDOA] = self.create_publisher(String, array_stream(robot, ArrayStream.TDOA), reliable(10))
         target.publishers[ArrayStream.ACTIVITY] = self.create_publisher(RenderedSoundActivity, array_stream(robot, ArrayStream.ACTIVITY), EVENT_QOS)
         target.publishers[ArrayStream.LEVELS] = self.create_publisher(MarkerArray, array_stream(robot, ArrayStream.LEVELS), reliable(1))
+        target.lazy = {stream: LazyPublisher(target.publishers[stream]) for stream in LAZY_STREAMS}
         return target
 
     def _stop_array(self, target: RenderTarget) -> None:
@@ -351,6 +355,7 @@ class RendererNode(ArenaMixinNode):
         for publisher in target.publishers.values():
             self.destroy_publisher(publisher)
         target.publishers.clear()
+        target.lazy.clear()
 
     def _lockstep_channels(self) -> list[LockstepChannel]:
         return [
@@ -926,7 +931,7 @@ class RendererNode(ArenaMixinNode):
                 self._publish_stream_activity(target, block_start)
             inputs = self._collect_inputs(target)
             if self._role is RenderRole.ARRAY:
-                target.publishers[ArrayStream.RENDER_INPUTS].publish(String(data=render_inputs_to_json(inputs)))
+                target.lazy[ArrayStream.RENDER_INPUTS].publish(lambda inputs=inputs: String(data=render_inputs_to_json(inputs)))
             result = render_block(target.state, inputs, self._params)
             self._clipped_samples += result.clipped_samples
             for source_id in tuple(target.streams):
@@ -970,27 +975,22 @@ class RendererNode(ArenaMixinNode):
         names = self.spec.channel_names
         raw = apply_controls(result.raw, enabled=enabled, muted=muted)
         stems = {
-            ArrayStream.RAW: raw,
-            ArrayStream.STEM_MOTOR: apply_controls(result.motor, enabled=enabled, muted=muted),
-            ArrayStream.STEM_PEDESTRIAN: apply_controls(result.ped, enabled=enabled, muted=muted),
-            ArrayStream.STEM_AMBIENT: apply_controls(result.ambient, enabled=enabled, muted=muted),
+            ArrayStream.STEM_MOTOR: result.motor,
+            ArrayStream.STEM_PEDESTRIAN: result.ped,
+            ArrayStream.STEM_AMBIENT: result.ambient,
         }
         settings = self._monitor_settings()
         stereo, hearing = monitor_mix(raw, self.spec, settings)
-        publishers = target.publishers
+        lazy = target.lazy
+        target.publishers[ArrayStream.RAW].publish(self._frame(target, raw, stamp, names, spatial=True))
         for stream, audio in stems.items():
-            publishers[stream].publish(self._frame(target, audio, stamp, names, spatial=True))
-        publishers[ArrayStream.MONITOR].publish(self._frame(target, stereo, stamp, STEREO_NAMES, spatial=False))
-        hearing_pub = publishers[ArrayStream.HEARING_MONO]
-        if hearing_pub.get_subscription_count() > 0:
-            hearing_pub.publish(self._frame(target, hearing[None, :], stamp, ("hearing",), spatial=False))
+            lazy[stream].publish(lambda audio=audio: self._frame(target, apply_controls(audio, enabled=enabled, muted=muted), stamp, names, spatial=True))
+        lazy[ArrayStream.MONITOR].publish(lambda: self._frame(target, stereo, stamp, STEREO_NAMES, spatial=False))
+        lazy[ArrayStream.HEARING_MONO].publish(lambda: self._frame(target, hearing[None, :], stamp, ("hearing",), spatial=False))
         target.last_levels = np.concatenate((np.asarray(rms(raw, axis=1)), [rms(hearing), rms(stereo[0]), rms(stereo[1])])).astype(np.float32)
-        energy_pub = publishers[ArrayStream.ENERGY]
-        if energy_pub.get_subscription_count() > 0:
-            energy_pub.publish(Float32MultiArray(data=target.last_levels.tolist()))
-        tdoa_pub = publishers[ArrayStream.TDOA]
-        if self._tdoa_conf.ENABLED.value and tdoa_pub.get_subscription_count() > 0:
-            tdoa_pub.publish(self._tdoa(raw, stamp))
+        lazy[ArrayStream.ENERGY].publish(lambda: Float32MultiArray(data=target.last_levels.tolist()))
+        if self._tdoa_conf.ENABLED.value:
+            lazy[ArrayStream.TDOA].publish(lambda: self._tdoa(raw, stamp))
         if playback and self._output is not None and self._output_conf.ENABLED.value:
             mix = self._audible_mix(result)
             if mix is not result.raw:
@@ -1000,8 +1000,8 @@ class RendererNode(ArenaMixinNode):
     def _publish_listener(self, result: RenderResult, stamp: TimeMsg) -> None:
         settings = self._monitor_settings()
         playback = monitor_playback(*monitor_mix(self._audible_mix(result), self.spec, settings), settings)
-        if self._listener_pub is not None and self._listener_pub.get_subscription_count() > 0:
-            self._listener_pub.publish(self._frame(self._targets[""], playback, stamp, STEREO_NAMES, spatial=False))
+        if self._listener_pub is not None:
+            self._listener_pub.publish(lambda: self._frame(self._targets[""], playback, stamp, STEREO_NAMES, spatial=False))
         if self._output is not None:
             self._output.push(playback.T)
 
@@ -1041,9 +1041,9 @@ class RendererNode(ArenaMixinNode):
     def _publish_levels(self) -> None:
         """Label each array microphone with its last block level in dBFS."""
         for target in self._targets.values():
-            publisher = target.publishers.get(ArrayStream.LEVELS)
+            publisher = target.lazy.get(ArrayStream.LEVELS)
             frame = self._mount_frame(target)
-            if publisher is None or not frame or publisher.get_subscription_count() == 0:
+            if publisher is None or not frame or not publisher.wanted:
                 continue
             header = Header(frame_id=frame, stamp=self.get_clock().now().to_msg())
             markers = []
@@ -1056,7 +1056,7 @@ class RendererNode(ArenaMixinNode):
                 label.lifetime.sec = 1
                 label.text = f"{dbfs_from_rms(float(target.last_levels[index])):.1f} dBFS"
                 markers.append(label)
-            publisher.publish(MarkerArray(markers=markers))
+            publisher.publish(lambda markers=markers: MarkerArray(markers=markers))
 
     def _tdoa(self, raw: np.ndarray, stamp: TimeMsg) -> String:
         estimates: dict[str, dict[str, float]] = {}

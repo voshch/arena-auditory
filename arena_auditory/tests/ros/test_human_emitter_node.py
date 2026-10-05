@@ -204,7 +204,7 @@ def test_walking_pedestrian_publishes_default_footstep_and_cone(human_emitter) -
     producer, consumer, namespace, emit = human_emitter
     markers: list[MarkerArray] = []
     consumer.create_subscription(MarkerArray, f"{namespace}/pedestrian_markers/extra", markers.append, reliable(10))
-    _spin_until(rclpy, [producer, consumer], lambda: producer._marker_publisher.get_subscription_count() > 0)
+    _spin_until(rclpy, [producer, consumer], lambda: producer._marker_publisher.wanted)
 
     event = emit(_pedestrian(7, 1.0, 2.0, speed_mps=0.4))
     _spin_until(rclpy, [producer, consumer], lambda: bool(markers))

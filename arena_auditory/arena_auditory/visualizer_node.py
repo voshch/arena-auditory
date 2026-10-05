@@ -11,9 +11,9 @@ import zlib
 import attrs
 from arena_auditory_msgs.msg import ContinuousAudioSourceState, ContinuousHeardSoundState, HeardSoundEvent, RoomImpulse, SoundReception, SoundSource
 from arena_rclpy_mixins import ArenaMixinNode
+from arena_rclpy_mixins.lazy import LazyPublisher
 from arena_rclpy_mixins.qos import best_effort, latched, reliable
 from geometry_msgs.msg import Point
-from rclpy.publisher import Publisher
 from std_msgs.msg import ColorRGBA, Header
 from visualization_msgs.msg import Marker, MarkerArray
 
@@ -75,8 +75,8 @@ class SoundPropagationVisualizer(ArenaMixinNode):
         self.conf = Configuration(self)
         self._viz = self.conf.Viz
         self._previous_portal_count = {"pedestrian": 0, "robot": 0}
-        self._pedestrian_publisher = self.create_publisher(MarkerArray, PEDESTRIAN_PROPAGATION_MARKERS, reliable(10))
-        self._robot_publisher = self.create_publisher(MarkerArray, ROBOT_PROPAGATION_MARKERS, reliable(10))
+        self._pedestrian_publisher: LazyPublisher[MarkerArray] = LazyPublisher(self.create_publisher(MarkerArray, PEDESTRIAN_PROPAGATION_MARKERS, reliable(10)))
+        self._robot_publisher: LazyPublisher[MarkerArray] = LazyPublisher(self.create_publisher(MarkerArray, ROBOT_PROPAGATION_MARKERS, reliable(10)))
         self._room_publisher = self.create_publisher(MarkerArray, ROOM_MARKERS, latched(1))
         self._environment_source_publisher = self.create_publisher(MarkerArray, ENVIRONMENT_SOURCE_MARKERS, latched(32))
         self._room_marker_frame = ""
@@ -146,7 +146,7 @@ class SoundPropagationVisualizer(ArenaMixinNode):
         marker.lifetime.nanosec = int((seconds % 1.0) * NS_PER_S)
         return marker
 
-    def _listener_output(self, listener_id: str) -> tuple[Publisher, str, ColorRGBA] | None:
+    def _listener_output(self, listener_id: str) -> tuple[LazyPublisher[MarkerArray], str, ColorRGBA] | None:
         try:
             kind = ListenerId.parse(listener_id).kind
         except ValueError:
@@ -172,6 +172,10 @@ class SoundPropagationVisualizer(ArenaMixinNode):
         frame = str(msg.header.frame_id).strip()
         if not frame:
             self.get_logger().warning("cannot visualize sound without a frame ID")
+            return
+        if not publisher.wanted:
+            self._previous_portal_count[listener_kind] = 0
+            self._consider_plot(msg.header, msg.source, reception)
             return
         lifetime = self._viz.LIFETIME_S.value
         source = Point(x=float(msg.source.position.x), y=float(msg.source.position.y), z=float(msg.source.position.z))
@@ -222,7 +226,7 @@ class SoundPropagationVisualizer(ArenaMixinNode):
             stale.action = Marker.DELETE
             markers.append(stale)
         self._previous_portal_count[listener_kind] = len(portal_points)
-        publisher.publish(MarkerArray(markers=markers))
+        publisher.publish(lambda: MarkerArray(markers=markers))
         self._consider_plot(msg.header, msg.source, reception)
 
     def _on_continuous_heard(self, msg: ContinuousHeardSoundState) -> None:
@@ -248,6 +252,8 @@ class SoundPropagationVisualizer(ArenaMixinNode):
         if output is None or not frame:
             return
         publisher, listener_kind, color = output
+        if not publisher.wanted:
+            return
         lifetime = self._viz.CONTINUOUS_LIFETIME_S.value
         base_id = _stable_marker_base(f"{msg.source.id}|{listener_id}", 4 + len(reception.portal_positions))
         source = Point(x=float(msg.source.position.x), y=float(msg.source.position.y), z=float(msg.source.position.z))
@@ -287,7 +293,7 @@ class SoundPropagationVisualizer(ArenaMixinNode):
             portal.scale.x = portal.scale.y = portal.scale.z = 0.28
             portal.color = color
             markers.append(portal)
-        publisher.publish(MarkerArray(markers=markers))
+        publisher.publish(lambda: MarkerArray(markers=markers))
 
     def _on_continuous_source(self, msg: ContinuousAudioSourceState) -> None:
         source = msg.source

@@ -32,6 +32,7 @@ import numpy as np
 import tf2_ros
 from arena_auditory_msgs.msg import AuditoryDetection
 from arena_rclpy_mixins import ArenaMixinNode, qos
+from arena_rclpy_mixins.lazy import LazyPublisher
 from arena_runtime_msgs.msg import LockstepChannel
 from geometry_msgs.msg import Point
 from nav2_msgs.msg import CostmapFilterInfo
@@ -64,7 +65,7 @@ class _Robot:
     trend: LevelTrend
     pub_mask: Publisher
     pub_state: Publisher
-    pub_markers: Publisher
+    pub_markers: LazyPublisher[MarkerArray]
     pub_filter_info: Publisher
     subs: list[Subscription] = attrs.Factory(list)
     belief: OccupancyGrid | None = None
@@ -119,7 +120,7 @@ class PolicyNode(ArenaMixinNode):
             trend=LevelTrend(level_trend_tau_s=p.LEVEL_TREND_TAU_S.value),
             pub_mask=self.create_publisher(OccupancyGrid, f"{scope}/{SPEED_FILTER_MASK}", qos.latched()),
             pub_state=self.create_publisher(String, f"{scope}/{POLICY_STATE}", qos.latched()),
-            pub_markers=self.create_publisher(MarkerArray, f"{scope}/{POLICY_MARKERS}", qos.reliable(1)),
+            pub_markers=LazyPublisher(self.create_publisher(MarkerArray, f"{scope}/{POLICY_MARKERS}", qos.reliable(1))),
             pub_filter_info=self.create_publisher(CostmapFilterInfo, f"{scope}/{COSTMAP_FILTER_INFO}", qos.latched()),
         )
         robot.subs = [
@@ -136,7 +137,7 @@ class PolicyNode(ArenaMixinNode):
     def _stop(self, robot: _Robot) -> None:
         for sub in robot.subs:
             self.destroy_subscription(sub)
-        for pub in (robot.pub_mask, robot.pub_state, robot.pub_markers, robot.pub_filter_info):
+        for pub in (robot.pub_mask, robot.pub_state, robot.pub_markers.publisher, robot.pub_filter_info):
             self.destroy_publisher(pub)
 
     def _channel(self, robot: _Robot) -> LockstepChannel:
@@ -314,6 +315,8 @@ class PolicyNode(ArenaMixinNode):
         self._publish_markers(robot, bend, state)
 
     def _publish_markers(self, robot: _Robot, bend: BlindBend | None, state: State) -> None:
+        if not robot.pub_markers.wanted:
+            return
         arr = MarkerArray()
         frame = self._map_conf.FRAME.value
         stamp = self.get_clock().now().to_msg()
@@ -329,7 +332,7 @@ class PolicyNode(ArenaMixinNode):
                 m.pose.orientation.w = 1.0
                 m.points = [Point(x=float(x), y=float(y), z=0.08) for x, y in pts]
             arr.markers.append(m)
-        robot.pub_markers.publish(arr)
+        robot.pub_markers.publish(lambda: arr)
 
 
 def main() -> None:

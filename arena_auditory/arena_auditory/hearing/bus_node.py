@@ -7,6 +7,7 @@ import math
 import attrs
 from arena_auditory_msgs.msg import AuditoryDetection, HeardSoundEvent
 from arena_rclpy_mixins import ArenaMixinNode, qos
+from arena_rclpy_mixins.lazy import LazyPublisher
 from rclpy.duration import Duration
 from rclpy.publisher import Publisher
 from rclpy.time import Time
@@ -60,7 +61,7 @@ class BusNode(ArenaMixinNode):
                 base_frame=binding.base_frame,
                 heard=self.create_publisher(HeardSoundEvent, heard_sound(binding.name), qos.reliable(50)),
                 detections=self.create_publisher(AuditoryDetection, detections(binding.name, Frontend.BUS), qos.reliable(50)),
-                markers=self.create_publisher(Marker, heard_sound_marker(binding.name), qos.reliable(10)),
+                markers=LazyPublisher(self.create_publisher(Marker, heard_sound_marker(binding.name), qos.reliable(10))),
             )
             self.get_logger().info(f"registered robot hearing outputs for {binding.name!r} in frame {binding.base_frame!r}")
 
@@ -114,7 +115,7 @@ class BusNode(ArenaMixinNode):
 
     def _publish_marker(self, robot: str, outputs: _RobotOutputs, msg: HeardSoundEvent) -> None:
         kind = self._kinds.get(msg.source.kind)
-        if kind is None or not kind.marker:
+        if kind is None or not kind.marker or not outputs.markers.wanted:
             return
         bus = self._bus
         r, g, b = kind.color
@@ -132,7 +133,7 @@ class BusNode(ArenaMixinNode):
         marker.text = f"HEARD {kind.name.upper()}\n{msg.reception.received_level_db:.1f} dB"
         marker.lifetime = Duration(seconds=bus.MARKERS_LIFETIME_S.value).to_msg()
         marker.frame_locked = True
-        outputs.markers.publish(marker)
+        outputs.markers.publish(lambda: marker)
 
 
 def main() -> None:

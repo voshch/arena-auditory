@@ -102,7 +102,7 @@ def test_propagation_visualizer_splits_pedestrian_and_robot_markers(rclpy_contex
         _spin_until(
             rclpy,
             [visualizer, consumer],
-            lambda: visualizer._pedestrian_publisher.get_subscription_count() > 0 and visualizer._robot_publisher.get_subscription_count() > 0,
+            lambda: visualizer._pedestrian_publisher.wanted and visualizer._robot_publisher.wanted,
         )
         not_ready = _heard("agent:3")
         not_ready.reception.used_fallback = True

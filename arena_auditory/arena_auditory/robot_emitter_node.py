@@ -10,11 +10,11 @@ from concurrent.futures import ThreadPoolExecutor
 import attrs
 from arena_auditory_msgs.msg import ContinuousAudioSourceState
 from arena_rclpy_mixins import ArenaMixinNode
+from arena_rclpy_mixins.lazy import LazyPublisher
 from arena_rclpy_mixins.qos import best_effort, latched, reliable
 from builtin_interfaces.msg import Duration, Time
 from geometry_msgs.msg import Point
 from nav_msgs.msg import Odometry
-from rclpy.publisher import Publisher
 from rclpy.subscription import Subscription
 from std_msgs.msg import ColorRGBA
 from task_generator_msgs.msg import EpisodeRecord, RobotFleet
@@ -46,7 +46,7 @@ def marker_base_id(robot: str) -> int:
 class _Robot:
     binding: RobotBinding
     wheel_separation_m: float
-    marker_publisher: Publisher
+    marker_publisher: LazyPublisher[MarkerArray]
     odom_subscriptions: list[Subscription]
     stamp: Time | None = None
     state: dict[str, float] = attrs.field(factory=dict)
@@ -95,7 +95,7 @@ class RobotEmitterNode(ArenaMixinNode):
             self._robots[binding.name] = _Robot(
                 binding=binding,
                 wheel_separation_m=separation,
-                marker_publisher=self.create_publisher(MarkerArray, motor_markers(binding.name), reliable(10)),
+                marker_publisher=LazyPublisher(self.create_publisher(MarkerArray, motor_markers(binding.name), reliable(10))),
                 odom_subscriptions=subscriptions,
             )
             self.get_logger().info(f"robot {binding.name!r} motor motion sources: {', '.join(binding.odom_topics)}")
@@ -177,6 +177,8 @@ class RobotEmitterNode(ArenaMixinNode):
         self._source_publisher.publish(msg)
 
     def _publish_markers(self, robot: _Robot) -> None:
+        if not robot.marker_publisher.wanted:
+            return
         if not self._drivetrain.MARKERS_ENABLED.value:
             return
         try:
@@ -217,9 +219,11 @@ class RobotEmitterNode(ArenaMixinNode):
         outline.color = ColorRGBA(r=r, g=g, b=b, a=0.95)
         outline.lifetime = fill.lifetime
         outline.points = [apex, *arc, apex]
-        robot.marker_publisher.publish(MarkerArray(markers=[fill, outline]))
+        robot.marker_publisher.publish(lambda: MarkerArray(markers=[fill, outline]))
 
     def _clear_markers(self, robot: _Robot) -> None:
+        if not robot.marker_publisher.wanted:
+            return
         stamp = self.get_clock().now().to_msg()
         base_id = marker_base_id(robot.binding.name)
         markers = MarkerArray()
@@ -231,7 +235,7 @@ class RobotEmitterNode(ArenaMixinNode):
             marker.id = base_id + index
             marker.action = Marker.DELETE
             markers.markers.append(marker)
-        robot.marker_publisher.publish(markers)
+        robot.marker_publisher.publish(lambda: markers)
 
 
 def main() -> None:
