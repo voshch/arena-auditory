@@ -8,13 +8,14 @@ from collections.abc import Mapping
 import attrs
 import numpy as np
 from arena_rclpy_mixins.registry import ClassRegistry
+from arena_simulation_setup.tree.assets.sound_catalog import SoundAsset, Variant
 
-from arena_auditory.assets import DecodedSample, SampleDecoder, SoundAsset, Variant
+from arena_auditory.assets import DecodedSample, SampleDecoder
 from arena_auditory.shared import SourceSpec
 from arena_auditory.sources.events import PedestrianEventDetector, PedestrianState
 
 if typing.TYPE_CHECKING:
-    from arena_auditory.params import ParamGroup
+    from arena_rclpy_mixins.param_groups import ParamGroup
 
 
 @attrs.frozen

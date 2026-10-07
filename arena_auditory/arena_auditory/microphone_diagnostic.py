@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 import numpy as np
-from arena_auditory_msgs.msg import AudioFrame
 from arena_rclpy_mixins import ArenaMixinNode
 from arena_rclpy_mixins.qos import latched, reliable
+from arena_robots.audio import ArrayStream, array_stream, dbfs_from_rms, gcc_phat, load_array_spec, rms
+from arena_robots.fleet import bind_robot
+from arena_robots_msgs.msg import AudioFrame
 from task_generator_msgs.msg import RobotFleet
 
-from arena_auditory.constants import STATE_ROBOTS, ArrayStream, array_stream
+from arena_auditory.constants import STATE_ROBOTS
 from arena_auditory.params import Configuration
-from arena_auditory.render.dsp import gcc_phat
 from arena_auditory.render.monitor import tdoa_pairs
-from arena_auditory.shared import bind_robot, dbfs_from_rms, load_array_spec, rms
 
 
 def _evidence(first: float, second: float) -> tuple[float, float]:

@@ -1,17 +1,21 @@
 # arena_auditory
 
-The auditory simulator adds robot microphone arrays, sound propagation, robot
-hearing and workstation playback as its own axis next to the human simulator.
-`auditory:=none` (the default) runs without the auditory nodes. `auditory:=arena`
-launches this stack per env and makes the task generator bring up the map
-server it reads. Pedestrian footsteps and speech are produced from the human
+The auditory simulator is the `arena` backend of the acoustics axis next to the
+human simulator: robot microphone arrays, sound propagation, the simulator bus
+and workstation playback. `acoustics:=none` (the default) runs without the
+auditory nodes. `acoustics:=arena` launches this stack per env and makes the
+task generator bring up the map server it reads. Pedestrian footsteps and speech are produced from the human
 simulator's `arena_peds` topic, whichever backend publishes it.
 
 This repository is the optional auditory feature, a submodule of Arena. Install
 it with `arena feature auditory install`, which checks it out, installs its
 system dependencies through rosdep (PortAudio for sounddevice), syncs its Python
-dependencies (torch, pyroomacoustics, librosa, sounddevice, polars, pyarrow)
-and rebuilds.
+dependencies (pyroomacoustics, sounddevice, polars, pyarrow) and rebuilds.
+
+Robot hearing (belief grid, policy, srp and SELDnet front-ends, the Nav2
+speed-filter overlay) is the separate package `arena_hearing`, installed with
+`arena feature hearing install`. This package keeps the simulator bus that
+feeds it.
 
 ## Layout
 
@@ -19,23 +23,21 @@ and rebuilds.
 arena_auditory/                 this repository
 |-- arena_auditory/             ament_python package
 |   |-- arena_auditory/         python package
-|   |   |-- api.py              the names task_generator imports
-|   |   |-- shared.py           SourceSpec, ListenerId, ArraySpec, RobotBinding, level helpers
-|   |   |-- constants.py        every topic and service name, ArrayStream
+|   |   |-- api.py              the names the task_generator acoustics backend imports
+|   |   |-- shared.py           SourceSpec, ListenerId
+|   |   |-- constants.py        every topic and service name
 |   |   |-- params.py           every node parameter and its default
 |   |   |-- world.py rooms.py materials.py   acoustic world, rooms, materials
 |   |   |-- world_tracker.py    world and map subscriptions, realizes the world in the map frame
-|   |   |-- assets.py           sound library: kinds, assets, variants, decoding
+|   |   |-- assets.py           sample decoding of sound assets
 |   |   |-- propagation/        backends, portal routing, RIR cache, impulses
 |   |   |-- sources/            source models (wav, wav_loop, drivetrain), pedestrian events
 |   |   |-- render/             block renderer, DSP, monitor, workstation output
-|   |   |-- hearing/            robot hearing: bus, belief, policy, srp and seld front-ends
 |   |   |-- dataset/            acoustics recording export and capture wait
-|   |   `-- *_node.py, offline_render.py, acoustic_audit.py, microphone_diagnostic.py
-|   |-- config/                 sounds.yaml, arrays/, acoustic_materials.yaml, weights.yaml, hearing/nav2_overlay.yaml
-|   |-- launch/                 arena_auditory.launch.py, hearing.launch.py
-|   |-- sounds/Common/Sound/    bundled sound assets
-|   `-- tools/                  source-only scripts, not installed: scenario generation, dataset recording, belief replay
+|   |   `-- *_node.py, bus_node.py, offline_render.py, acoustic_audit.py, microphone_diagnostic.py
+|   |-- config/                 acoustic_materials.yaml
+|   |-- launch/                 arena_auditory.launch.py
+|   `-- tools/                  source-only scripts, not installed: scenario generation, dataset recording
 |-- arena_auditory_msgs/        messages and services
 `-- arena_auditory_viz/         RViz panel and tools
 ```
@@ -52,10 +54,10 @@ the env (`/arena/env_0/task_generator_node/<node>` for env 0):
 | `robot_emitter` | `robot_emitter` | Publishes the continuous noise sources of every robot, the motor driven by its odometry. |
 | `array_renderer` | `renderer` (`render.role: array`) | Renders the microphone array (`array.spec`) of every fleet robot to PCM, the stems, the monitor and the diagnostics. Plays one robot's monitor on the workstation while `output.enabled`. Runs with `OMP_NUM_THREADS=1`. |
 | `listener_renderer` | `renderer` (`render.role: listener`) | Renders the single microphone `listener.id` to the workstation. Not launched with `auditory.output.device:=none`. |
-| `robot_hearing_node` | `robot_hearing_node` | The simulator bus: republishes what each robot's `robot:<r>` listener hears as `<r>/heard_sound`, `AuditoryDetection` on `<r>/hearing/bus/detections` and a text marker. |
+| `robot_hearing_node` | `robot_hearing_node` | The simulator bus: republishes what each robot's `robot:<r>` listener hears as `<r>/heard_sound`, `arena_robots_msgs/SoundDetection` on `<r>/hearing/bus/detections` and a text marker. |
 | `sound_propagation_visualizer` | `sound_propagation_visualizer` | Propagation paths, rooms, portals and environment sources in RViz. Launched with `auditory.viz.enabled:=true`. |
 
-`hearing.launch.py` adds the robot hearing nodes, see [Robot-side hearing](#robot-side-hearing).
+The robot hearing nodes come from `arena_hearing`, see [Robot hearing](#robot-hearing).
 
 Further executables:
 
@@ -64,7 +66,6 @@ Further executables:
 | `auditory_offline_render` | Re-renders a recorded `diagnostics/render_inputs` trace (v1 and v2) offline. |
 | `acoustic_world_audit` | Audits acoustic zone coverage and portals of installed worlds, `--plot-room` plots a room impulse response. |
 | `microphone_diagnostic` | Console levels and GCC-PHAT estimates of a `raw_array` topic. |
-| `hearing_setup`, `hearing_audio_replay` | SELDnet weights, wav replay as `AudioFrame`. |
 | `export_acoustics_recording`, `wait_acoustics_capture` | Acoustics dataset pipeline, see [tools/README.md](arena_auditory/tools/README.md). |
 
 ## Parameters
@@ -84,7 +85,6 @@ node declares only the groups it uses. Names that appear in several nodes
 | `render.*`, `array.*`, `monitor.*`, `tdoa.*`, `diagnostics.*`, `output.*`, `motor.*` | renderers, `array.*` and `diagnostics.period_s` also propagation |
 | `bus.*` | `robot_hearing_node` |
 | `viz.*` | `sound_propagation_visualizer` |
-| `hearing.*`, `belief.*`, `map.frame`, `policy.*`, `audio.reliable.enabled`, `seld.*`, `srp.*` | hearing nodes, the front-ends take geometry and MEMS sensitivity from each `AudioFrame` |
 
 The two renderers share one executable. These defaults depend on `render.role`:
 
@@ -108,14 +108,17 @@ ros2 param set /arena/env_0/task_generator_node/sound_propagation_node propagati
 
 ## Launch arguments
 
-`arena launch ... auditory:=arena` passes every `auditory.<param>:=<value>` to
+`arena launch ... acoustics:=arena` passes every `auditory.<param>:=<value>` to
 every stack node as ROS parameter `<param>`, coerced to the type of its default
 in `params.py`. Parameters a node does not declare are ignored. An empty value
-keeps the node default. The declared arguments are:
+keeps the node default. Each argument's description lives on its `Param` in
+`params.py`, and `launch/arena_auditory.launch.py` declares every described
+parameter as a launch argument. The task generator declares only `acoustics`
+and `auditory.static_sounds`. The arguments are:
 
 | Argument | Node default | Effect |
 |---|---|---|
-| `auditory` | `none` | `arena` starts the stack |
+| `acoustics` | `none` | `arena` starts the stack |
 | `auditory.output.device` | `auto` | PortAudio device, `auto` tries `pulse`, `pipewire`, `default`, then the PortAudio default. `none` starts no listener renderer |
 | `auditory.output.block_size` | `512` | Workstation callback block size. Repeated underflows call for a larger `output.buffer_s` |
 | `auditory.output.motor.enabled`, `auditory.output.ambient.enabled` | `true` | Play motor or environment audio on the workstation |
@@ -142,7 +145,7 @@ with a deprecation warning, see
 
 ## Messages
 
-`arena_auditory_msgs` holds every auditory interface:
+`arena_auditory_msgs` holds the simulator interfaces:
 
 | Type | Purpose |
 |---|---|
@@ -152,10 +155,14 @@ with a deprecation warning, see
 | `ContinuousAudioSourceState`, `ContinuousHeardSoundState` | Continuous source, before and after propagation |
 | `RoomImpulse` | Room impulse response by key, direct arrival normalized to 1 |
 | `AcousticPath` | Early reflection of a reception |
-| `AudioFrame` | Interleaved float32 PCM with channel names, frames, positions and yaws |
 | `RenderedSoundActivity` | Start and end sample of every rendered source |
-| `AuditoryDetection` | Bearing, level and kind of a detected sound, the input of the belief grid |
-| `SpawnSound`, `RemoveSound`, `SpawnMicrophone`, `RemoveMicrophone` | Runtime sources and microphones |
+| `SpawnMicrophone`, `RemoveMicrophone` | Runtime microphones |
+
+The audio signal `AudioFrame` (interleaved float32 PCM with channel names,
+frames, positions and yaws) and `SoundDetection` (bearing, level and kind of a
+detected sound) are in `arena_robots_msgs`. The runtime sound services
+`SpawnSound` and `RemoveSound` are in `task_generator_msgs`, served by the
+task generator's sounds module.
 
 ## Topics
 
@@ -181,14 +188,13 @@ Names below the task generator node, `<r>` is a robot name:
 | `<r>/audio/rendered_sound_activity` | `RenderedSoundActivity` | `array_renderer` |
 | `audio/listener/monitor` | `AudioFrame` | `listener_renderer`, only while subscribed |
 | `<r>/heard_sound`, `<r>/heard_sound_marker` | `HeardSoundEvent`, `Marker` | `robot_hearing_node`, the marker only while subscribed |
-| `<r>/hearing/<frontend>/detections` | `AuditoryDetection` | `robot_hearing_node` (bus), srp and seld front-ends |
+| `<r>/hearing/bus/detections` | `arena_robots_msgs/SoundDetection` | `robot_hearing_node` |
 | `<r>/motor_sound_markers` | `MarkerArray` | `robot_emitter`, only while subscribed |
 | `pedestrian_sound_propagation_markers`, `robot_sound_propagation_markers` | `MarkerArray` | visualizer, only while subscribed |
 | `acoustic_room_markers`, `environment_audio_source_markers` | `MarkerArray`, latched | visualizer |
 
 `<env ns>/pedestrian_markers/extra` carries the pedestrian footstep and speech
-cones. The hearing topics live below the env namespace, see
-[Robot-side hearing](#robot-side-hearing).
+cones.
 
 ## Listeners
 
@@ -208,7 +214,7 @@ The selected `listener.id` microphone is propagated in addition.
 
 ### Robot arrays
 
-`array.spec` picks a preset from `config/arrays/` or a yaml path:
+`array.spec` picks a preset from `arena_robots/config/audio/arrays/` or a yaml path:
 
 | Preset | Microphones | Rate | Block |
 |---|---|---|---|
@@ -240,7 +246,7 @@ output plays one of them: `array.robot` when set, else the first fleet robot.
 Robot-mounted microphones come from `auditory.microphones`:
 
 ```bash
-arena launch auditory:=arena \
+arena launch acoustics:=arena \
   auditory.microphones:='[{owner: robot, robot: jackal, placement: front, frame: front_laser, index: 1}]'
 ```
 
@@ -266,8 +272,7 @@ A heard event is anchored one block past the next unrendered block.
 When the render falls more than `render.max_catchup_blocks` behind, the
 surplus blocks are skipped and counted. Under `arena lockstep`, the array
 renderer registers one hard channel `audio/<r>` per rendered robot with one
-block per window, so the skip path never fires. Belief (`belief/<r>`), policy (`policy/<r>`) and
-the front-end heartbeats are hard channels too.
+block per window, so the skip path never fires.
 
 Both renderers select the source program through the source models of
 `sources/`: `wav` for one-shot clips, `wav_loop` for loops and `drivetrain`
@@ -342,68 +347,20 @@ renderer that of `mono`.
 
 ## Sound library
 
-Sounds are assets of the `Sound` kind, resolved like every other Arena asset:
-world-local `worlds/<w>/assets/Common/Sound/<name>/`, then
-`$ARENA_ASSETS_DIR_LOCAL/Common/Sound/<name>/`, then the bundled
-`share/arena_auditory/sounds/Common/Sound/<name>/`, then the network
-providers. Each asset directory holds `<name>.yaml` and its wavs:
+Sounds are assets of the `Sound` kind. The catalog (kinds table, manifests,
+variants, selection) is `arena_simulation_setup.tree.assets.sound_catalog`,
+its kinds table and manifest schema are documented in
+[configs/sounds/README.md](../arena_simulation_setup/configs/sounds/README.md).
+This package only decodes samples ([assets.py](arena_auditory/arena_auditory/assets.py)):
+`SampleDecoder` loads a variant's wav, resamples it to the render rate and
+normalizes it to the manifest's `normalize_dbfs`.
 
-```yaml
-version: 2
-kind: music
-desc: Looping radio music.
-tags: [music, radio, loop, environment]
-level_db: 62.0              # SPL at reference_distance_m
-reference_distance_m: 1.0
-normalize_dbfs: -12.5
-loop: true
-model: wav_loop
-variants:
-  - {id: radio_loop_01, file: radio_loop.wav}
-```
-
-`desc` and `tags` describe the asset for the asset database, which indexes
-sounds from these keys. Variant ids are unique within their asset. Variants
-may carry `match` (for example `{floor: [oak]}` on footsteps),
-`default: true`, `tags`, a per-variant `model` and `params`. The producer picks
-the variant deterministically from the source seed. Footsteps match the floor
-material under the pedestrian. A manifest may add new kinds through a `kinds:`
-mapping whose rows declare a `stem` like the kinds table. The library reads
-these fragments from every manifest in the world, shared local and bundled
-trees when it starts and on every world switch, so the kinds table is complete
-before any asset loads. An asset only a network provider holds adds its kinds
-when it first loads.
-
-`config/sounds.yaml` holds the kinds table:
-
-| Kind | Agent | Stem | Default asset | Notes |
-|---|---|---|---|---|
-| `footstep` | pedestrian | `pedestrian` | `footstep` | detected, marker |
-| `speech` | pedestrian | `pedestrian` | `greeting` | detected, marker |
-| `music` | environment | `ambient` | `radio_loop` | |
-| `alarm` | environment | `ambient` | `alarm_loop` | |
-| `motor` | robot | `motor` | `motor` | marker, `jackal_drivetrain` variant for Jackals |
-| `onset` | | `ambient` | | class-agnostic detection of the srp front-end |
-
-`stem` is required and one of `pedestrian`, `ambient` and `motor`, the renderer
-stem the kind's sources land in.
-
-The bundled assets are `footstep`, `greeting`, `motor`, `radio_loop` and
-`alarm_loop`. Inspect and move them with the asset CLI:
-
-```bash
-arena asset ls sound
-arena asset find sound footstep
-arena asset pull sound <name>
-arena asset push sound <name>
-```
-
-Looping files should match in waveform and level at both ends so the join
-does not click.
+A kind's `stem` names the renderer stem its sources land in, see
+[Stems](#stems).
 
 ## World and launch-defined sounds
 
-The `sounds` task module is added to `task.modules` whenever `auditory` is not
+The `sounds` task module is added to `task.modules` whenever `acoustics` is not
 `none` or `auditory.static_sounds` is non-empty. It renders every `sound`
 entity declared in the loaded world, the active scenario and the launch
 configuration.
@@ -460,7 +417,7 @@ use the same schema as a flat list and play from the start unless they name a
 `sound_on` or set `sounding`:
 
 ```bash
-arena launch world:=demo auditory:=arena \
+arena launch world:=demo acoustics:=arena \
   auditory.static_sounds:='[{name: room_radio, asset_id: radio_loop, position: [5.0, 5.0, 1.2], level: level_1, semantics: [{preset: sound, params: {volume_db: 62.0}}]}]'
 ```
 
@@ -512,8 +469,10 @@ coverage is incomplete.
 
 ## RViz plugins
 
-`arena_auditory_viz` ships an RViz panel and two tools. `arena viz` adds them
-to the generated configuration whenever the package is installed.
+`arena_auditory_viz` ships an RViz panel and two tools. The arena acoustics
+backend declares them in its viz manifest (`rviz_plugins` in `api.py`), so
+`arena viz` adds them to the generated configuration of an `acoustics:=arena`
+env.
 
 **AuditoryPanel** (`arena_auditory_viz::AuditoryPanel`, config key `Target`,
 default `/task_generator_node`) talks to `<Target>/array_renderer`,
@@ -549,152 +508,32 @@ sets the pose in the RViz fixed frame.
 Frame` makes it follow a frame. Runtime microphones are
 `microphone:runtime:<n>` and are cleared on the next episode or world change.
 
-## Robot-side hearing
+## Robot hearing
 
-`arena_auditory.hearing` is the consumer side. Every detection source
-publishes `AuditoryDetection`, so the belief node is source-agnostic:
-
-| Frontend | Source |
-|---|---|
-| `bus` | `robot_hearing_node`, the propagated `robot:<r>` receptions, map-frame bearings |
-| `srp` | `hearing_srp_frontend`, energy onsets plus GCC-PHAT over `raw_array`, array-frame bearings, kind `onset` |
-| `seld` | `hearing_seld_frontend`, the SELDnet model over `raw_array`, array-frame bearings |
-
-Every hearing node covers every fleet robot of its env: it follows
-`state/robots`, keeps its state per robot and registers one hard lockstep
-channel per robot. `hearing_belief` turns each robot's detections into a
-decaying pedestrian-likelihood grid (`hearing/belief_grid`,
-`hearing/belief_wedges`). `hearing_policy` reads it and is the single writer
-of the robot's Nav2 `SpeedFilter` mask (`hearing/speed_filter_mask`) and its
-`CostmapFilterInfo` (`hearing/costmap_filter_info`).
-
-The front-ends read the array geometry off each `AudioFrame`: `srp` fits
-GCC-PHAT over every pair of the microphone positions the frame declares, any
-array of two or more microphones apart in the plane, and rebuilds when the
-layout changes. `seld` reads only the array its weights were trained on
-(`array` in `config/weights.yaml`): a stream whose sample rate, channel names
-or microphone positions differ is refused with an error. Both convert levels
-to dB SPL with the MEMS sensitivity of `array.spec`.
-
-### Running in an Arena env
-
-`robot.hearing:=bus|srp|seld` includes `launch/hearing.launch.py` per env and
-merges `config/hearing/nav2_overlay.yaml` (a `SpeedFilter` on the local costmap
-and the controller's `speed_limit_topic`, both below the robot namespace) into
-every robot's Nav2 parameters:
+Robot hearing is the package `arena_hearing`, selected per env with
+`robot.hearing:=bus|srp|seld`. This package keeps the `bus` front end:
+`robot_hearing_node` publishes the propagated `robot:<r>` receptions as
+`arena_robots_msgs/SoundDetection` on `<r>/hearing/bus/detections` with
+map-frame bearings, the input of the `arena_hearing` belief node under
+`robot.hearing:=bus`. `srp` and `seld` read `<r>/audio/raw_array` and default
+`auditory.array.spec` to `four_mic`.
 
 ```bash
 export ARENA_WORLD_PATH=$ARENA_WS_DIR/src/Arena/_assets/arena-benchmarks-prod-public/suites/acoustics/worlds
 arena launch sim:=gazebo robot:=jackal world:=acoustics_bend_narrow_O \
     task.robots:=scenario task.obstacles:=scenario \
     task.scenario.file:=hearing__world-acoustics_bend_narrow_O__robot-moving__pedestrians-1__ends-a-to-b \
-    auditory:=arena robot.hearing:=bus
+    acoustics:=arena robot.hearing:=bus
 ```
 
-`srp` and `seld` default `auditory.array.spec` to `four_mic`.
-`hearing.launch.py` takes `env.ns`, `tg_node`, `frontend`, `policy` and
-`array.spec` (the renderer's `auditory.array.spec`), and forwards every
-`robot.hearing.<param>:=<value>` to the hearing nodes as parameter `<param>`,
-for example `robot.hearing.seld.device:=cpu` or
-`robot.hearing.belief.tau_s:=3.0`. These keys never reach the robot adapters.
-
-Topics below the task generator node `/arena/env_0/task_generator_node`,
-`<r>` is the robot namespace:
-
-| Direction | Topic | Note |
-|---|---|---|
-| in | `<r>/audio/raw_array` | `AudioFrame`, srp and seld |
-| in | `<r>/hearing/<frontend>/detections` | `AuditoryDetection` |
-| in | `map`, `state/resetting`, `state/robots` | grid geometry, reset, fleet |
-| in | `<r>/plan` | Nav2 global plan, for blind-bend detection |
-| out | `<r>/hearing/belief_grid`, `<r>/hearing/belief_wedges` | RViz, the wedges only while subscribed |
-| out | `<r>/hearing/speed_filter_mask` | `OccupancyGrid`, latched, read by the robot's SpeedFilter |
-| out | `<r>/hearing/costmap_filter_info` | `CostmapFilterInfo`, latched, points the SpeedFilter at the mask |
-| out | `<r>/hearing/policy_state` | JSON: state, distances, masses, level slope, limit, binding layer, yield count and time |
-| out | `<r>/hearing/policy_markers` | approach lane and hold band, only while subscribed |
-| Nav2 | `<r>/hearing/speed_limit` | SpeedFilter to controller |
-
-### Belief and policy
-
-The belief layer of the mask is the belief max-filtered over a disc of
-`policy.reaction_radius_m` (2.0 m) before thresholding. The robot slows from
-`policy.speed_free_pct` (100) to `policy.speed_min_pct` (40) as the belief
-goes from `policy.belief_threshold` (0.6) to 1. A wedge is never narrower
-than `belief.min_half_width_m` (0.3 m). `belief.level_range.enabled` (default
-false) keeps the wedge flat out to `belief.max_range_m`, since walls and doors
-attenuate an occluded pedestrian and the level would place it too far away.
-The emission level per kind is the level of the kind's default asset,
-overridable by `belief.emission_db.<kind>`.
-
-`hearing_policy` composes the mask from three layers by lowest nonzero
-percentage: belief, listen (`policy.listen_mps` on the approach to a blind
-bend) and hold (`policy.hold_mps` before the bend while yielding). The robot's
-own drivetrain masks the pedestrian it listens for, and its level grows with
-speed as (v / 1 m/s) to the power `motor.speed_exponent` (1.0).
-
-A plan point is blind when at least 25 % of the free cells within 2 m of the
-point `policy.lookahead_m` further along the plan, on its far side, are hidden
-from it by occupied cells. The bend is the first point from which that clears,
-or the plan end when the plan ends blind. Only blind stretches that start
-within `policy.approach_m` plus `policy.lookahead_m` are searched. States: cruise, listen inside `policy.approach_m`,
-yield once the belief mass within `policy.corner_radius_m` of the bend exceeds
-`policy.yield_fraction`, and pass once the mass moved behind the robot, faded
-below `policy.release_fraction`, or the level fell for `policy.recede_s`
-(each after `policy.min_yield_s`), or at `policy.yield_timeout_s`. Pass takes
-the bend at listen speed. Nav2 reads 0 % as no limit, so the hold is a
-0.03 m/s creep. `robot.hearing.policy:=belief|listen|full` picks the active
-layers.
-
-### Evaluation
-
-The arms are contestants of `contests/hearing.yaml` in arena_evaluation, run
-against the `acoustics` suite:
-
-```bash
-arena evaluation benchmark --suite acoustics --contest hearing
-```
-
-`yield_count` and `time_yielding_s` on `<r>/hearing/policy_state` are
-cumulative per robot. `python3 tools/replay_belief.py EPISODE_DIR` (from a source checkout) replays an exported episode
-through the belief grid offline, from SELDnet detections or the ground-truth
-labels.
-
-### Front-end checks
-
-```bash
-ros2 run arena_auditory hearing_audio_replay <4ch.wav> <robot> --array four_mic --ros-args -r __ns:=/arena/env_0
-```
-
-`hearing_audio_replay` publishes every channel of the wav on
-`<tg>/<robot>/audio/raw_array`, `--array` declares the geometry the
-front-ends need. A front-end picks the robot up from `state/robots`.
-
-The streaming SELDnet path re-runs the model on a 5 s sliding window once per
-100 ms label frame and emits the frame `seld.lookahead_frames` (default 5)
-before the window end. The bearing comes from `seld.bearing_source`: `gcc`
-(default) fits the array geometry to GCC-PHAT delays over every microphone
-pair, `seld` takes the model azimuth, which is front-biased on the shipped
-checkpoint.
-
-### Weights
-
-The SELDnet checkpoint and feature scaler are pinned with sha256 in
-`config/weights.yaml`, hosted on Hugging Face and stored in
-`$ARENA_DATA_DIR/auditory/seld/`:
-
-```bash
-ros2 run arena_auditory hearing_setup
-```
-
-The front-end fetches them on first use when they are missing. The model,
-SALSA-Lite features and multi-ACCDOA decode are in `hearing/dcase.py`, adapted
-from the DCASE 2023 SELD baseline (MIT).
+The belief grid, the policy, the front-ends, their parameters and the Nav2
+overlay are documented in `arena_hearing`.
 
 ## Tests
 
 ```bash
 python3 -m pytest arena_auditory/tests/unit -q
-python3 -m pytest arena_auditory/tests/ros/test_sound_event.py -q
+python3 -m pytest arena_auditory/tests/ros/test_auditory_round_trip.py -q
 ```
 
 The ROS round trip publishes a speech `SoundEvent`, expects a reception for
@@ -704,11 +543,9 @@ The ROS round trip publishes a speech `SoundEvent`, expects a reception for
 
 | File | Content |
 |---|---|
-| `config/sounds.yaml` | kinds table |
-| `config/arrays/*.yaml` | microphone array presets |
 | `config/acoustic_materials.yaml` | absorption and floor damping per material |
-| `config/weights.yaml` | SELDnet weights and pins |
-| `config/hearing/nav2_overlay.yaml` | Nav2 SpeedFilter overlay |
-| `arena_auditory/params.py` | every node parameter and default |
-| `task_generator/launch/auditory/` (Arena) | axis dispatch and the shim into `launch/arena_auditory.launch.py` |
-| `task_generator/task_generator/simulators/auditory/` (Arena) | node-side axis, the single gateway into this package |
+| `arena_auditory/params.py` | every node parameter, default and launch description |
+| `arena_simulation_setup/configs/sounds/kinds.yaml` (Arena) | kinds table |
+| `arena_robots/config/audio/arrays/*.yaml` (Arena) | microphone array presets |
+| `task_generator/launch/acoustics/arena/` (Arena) | install check and the include of `launch/arena_auditory.launch.py` |
+| `task_generator/task_generator/simulators/acoustics/arena/` (Arena) | node-side backend, the single gateway into this package |

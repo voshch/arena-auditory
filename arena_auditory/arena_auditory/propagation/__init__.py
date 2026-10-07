@@ -9,17 +9,18 @@ from collections.abc import Callable, Iterable, Iterator
 import attrs
 from arena_auditory_msgs.msg import AcousticPath, ContinuousHeardSoundState, HeardSoundEvent, SoundReception, SoundSource
 from arena_rclpy_mixins.registry import FactoryRegistry
+from arena_robots.audio import NS_PER_S, Vec3
+from arena_simulation_setup.tree.assets.sound_catalog import AgentKind, SoundLibrary
 from builtin_interfaces.msg import Duration
 from geometry_msgs.msg import Point
 from std_msgs.msg import Header
 
-from arena_auditory.assets import SoundLibrary
 from arena_auditory.materials import AcousticMaterialCatalog
 from arena_auditory.params import BackendName
 from arena_auditory.propagation.portal import PortalConfig
 from arena_auditory.propagation.pyroom_adapter import RirConfig
 from arena_auditory.propagation.rir import IMPULSE_WINDOW, Impulse, RirCache, digest, impulse_from_rir, rir_key
-from arena_auditory.shared import NS_PER_S, AgentKind, ListenerId, ListenerKind, SourceSpec, Vec3, point_vec3
+from arena_auditory.shared import ListenerId, ListenerKind, SourceSpec, point_vec3
 
 if typing.TYPE_CHECKING:
     from arena_auditory.propagation.pyroom import PyroomBackend

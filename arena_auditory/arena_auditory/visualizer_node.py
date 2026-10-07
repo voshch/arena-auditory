@@ -13,6 +13,8 @@ from arena_auditory_msgs.msg import ContinuousAudioSourceState, ContinuousHeardS
 from arena_rclpy_mixins import ArenaMixinNode
 from arena_rclpy_mixins.lazy import LazyPublisher
 from arena_rclpy_mixins.qos import best_effort, latched, reliable
+from arena_robots.audio import NS_PER_S, Vec3
+from arena_simulation_setup.tree.assets.sound_catalog import AgentKind
 from geometry_msgs.msg import Point
 from std_msgs.msg import ColorRGBA, Header
 from visualization_msgs.msg import Marker, MarkerArray
@@ -30,7 +32,7 @@ from arena_auditory.constants import (
 from arena_auditory.params import Configuration, PlotMode
 from arena_auditory.propagation import Impulse, RirCache
 from arena_auditory.propagation.plot import AcousticPlotDashboard, AcousticPlotSnapshot
-from arena_auditory.shared import NS_PER_S, AgentKind, ListenerId, ListenerKind, Vec3, point_vec3
+from arena_auditory.shared import ListenerId, ListenerKind, point_vec3
 from arena_auditory.world import AcousticWorld
 from arena_auditory.world_tracker import WorldTracker
 

@@ -1,7 +1,0 @@
-name: stereo
-sample_rate_hz: 44100
-block_size: 512
-sensitivity_dbfs_at_94_dbspl: -26.0
-mics:
-  - {name: left, position_m: [0.0, 0.10, 0.35], side: left}
-  - {name: right, position_m: [0.0, -0.10, 0.35], side: right}

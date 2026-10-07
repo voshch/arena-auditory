@@ -5,11 +5,12 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from arena_rclpy_mixins.param_groups import configure
 from scipy.signal import fftconvolve
 from shapely.geometry import Polygon
 
 from arena_auditory.materials import AcousticMaterialCatalog
-from arena_auditory.params import PortalGroup, RirGroup, configure
+from arena_auditory.params import PortalGroup, RirGroup
 from arena_auditory.propagation.portal import MultiPortalRirCoupler, PortalConfig
 from arena_auditory.propagation.pyroom_adapter import PyroomacousticsAdapter, RirConfig, RoomImpulseResponse, direct_arrival
 from arena_auditory.rooms import AcousticBoundarySpec, AcousticPortal, AcousticRoomSpec, AcousticWorldGraph, Position3D

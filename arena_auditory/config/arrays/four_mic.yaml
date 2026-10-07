@@ -1,9 +1,0 @@
-name: four_mic
-sample_rate_hz: 16000
-block_size: 320
-sensitivity_dbfs_at_94_dbspl: -26.0
-rectangular:
-  width_m: 0.310
-  length_m: 0.420
-  height_m: 0.220
-  corner_inset_m: 0.020

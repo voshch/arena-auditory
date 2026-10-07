@@ -7,15 +7,16 @@ import typing
 from collections.abc import Callable, Hashable
 from concurrent.futures import Executor, Future, ThreadPoolExecutor
 
+from arena_rclpy_mixins.param_groups import configure
 from arena_rclpy_mixins.qos import latched
+from arena_simulation_setup.tree.assets.sound_catalog import SoundLibrary
 from nav_msgs.msg import OccupancyGrid
 from rclpy.node import Node
 from std_msgs.msg import String
 from task_generator_msgs.msg import EpisodeRecord
 
-from arena_auditory.assets import SoundLibrary
 from arena_auditory.constants import MAP, STATE_EPISODE, STATE_WORLD
-from arena_auditory.params import Configuration, configure
+from arena_auditory.params import Configuration
 from arena_auditory.world import LOAD_ERRORS, AcousticWorld, OccupancyMap, WorldConfig
 
 if typing.TYPE_CHECKING:

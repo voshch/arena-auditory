@@ -3,8 +3,6 @@ name = "arena_auditory"
 version = "0.0.0"
 dependencies = [
     "attrs",
-    "huggingface-hub",
-    "librosa",
     "matplotlib",
     "mcap",
     "mcap-ros2-support",
@@ -17,7 +15,6 @@ dependencies = [
     "scipy",
     "shapely",
     "sounddevice>=0.5.5",
-    "torch",
 ]
 dynamic = ["description", "license", "maintainers", "scripts"]
 

@@ -18,7 +18,6 @@ import attrs
 import numpy as np
 import yaml
 from arena_auditory_msgs.msg import (
-    AudioFrame,
     ContinuousHeardSoundState,
     HeardSoundEvent,
     RenderedSoundActivity,
@@ -28,10 +27,15 @@ from arena_auditory_msgs.msg import (
 )
 from arena_rclpy_mixins import ArenaMixinNode
 from arena_rclpy_mixins.lazy import LazyPublisher
+from arena_rclpy_mixins.param_groups import Param, ParamGroup
 from arena_rclpy_mixins.qos import best_effort, latched, reliable
 from arena_rclpy_mixins.Time import Time
+from arena_robots.audio import ArrayStream, array_stream, dbfs_from_rms, gcc_phat, load_array_spec, rms
+from arena_robots.fleet import RobotBinding, robot_bindings
+from arena_robots_msgs.msg import AudioFrame
 from arena_runtime.lockstep import register_channels
 from arena_runtime_msgs.msg import LockstepChannel
+from arena_simulation_setup.tree.assets.sound_catalog import SoundAsset, SoundLibrary, Variant
 from builtin_interfaces.msg import Time as TimeMsg
 from geometry_msgs.msg import Point
 from rclpy.clock import Clock, ClockType, JumpThreshold, TimeJump
@@ -42,18 +46,9 @@ from std_msgs.msg import ColorRGBA, Float32MultiArray, Header, String
 from task_generator_msgs.msg import EpisodeRecord, RobotFleet
 from visualization_msgs.msg import Marker, MarkerArray
 
-from arena_auditory.assets import DecodedSample, SampleDecoder, SoundAsset, SoundLibrary, Variant
-from arena_auditory.constants import (
-    CONTINUOUS_HEARD_SOUNDS,
-    HEARD_SOUND_EVENTS,
-    LISTENER_MONITOR,
-    ROOM_IMPULSES,
-    STATE_EPISODE,
-    STATE_ROBOTS,
-    ArrayStream,
-    array_stream,
-)
-from arena_auditory.params import Configuration, MonitorMode, Param, ParamGroup, RenderRole
+from arena_auditory.assets import DecodedSample, SampleDecoder
+from arena_auditory.constants import CONTINUOUS_HEARD_SOUNDS, HEARD_SOUND_EVENTS, LISTENER_MONITOR, ROOM_IMPULSES, STATE_EPISODE, STATE_ROBOTS
+from arena_auditory.params import Configuration, MonitorMode, RenderRole
 from arena_auditory.propagation import IMPULSE_WINDOW
 from arena_auditory.render.clock import RenderCursor
 from arena_auditory.render.core import (
@@ -71,10 +66,10 @@ from arena_auditory.render.core import (
     render_block,
     render_inputs_to_json,
 )
-from arena_auditory.render.dsp import gcc_phat, interleave, mems_gain
+from arena_auditory.render.dsp import interleave, mems_gain
 from arena_auditory.render.monitor import MonitorConfig, apply_controls, monitor_mix, monitor_playback, tdoa_pairs
 from arena_auditory.render.output import DISABLED_DEVICES, AudioOutput
-from arena_auditory.shared import ListenerId, RobotBinding, SourceSpec, dbfs_from_rms, load_array_spec, rms, robot_bindings
+from arena_auditory.shared import ListenerId, SourceSpec
 from arena_auditory.sources import SOURCE_MODELS, BufferProgram, ProgramContext, StreamModel, StreamProgram, stream_model, stream_models, streamed, tuning_of
 from arena_auditory.world_tracker import follow_world_sounds
 
@@ -86,7 +81,7 @@ AUDIO_QOS = reliable(10)
 LAZY_STREAMS = (ArrayStream.STEM_MOTOR, ArrayStream.STEM_PEDESTRIAN, ArrayStream.STEM_AMBIENT, ArrayStream.MONITOR, ArrayStream.HEARING_MONO, ArrayStream.ENERGY, ArrayStream.TDOA, ArrayStream.RENDER_INPUTS, ArrayStream.LEVELS)
 
 LISTENER_SPEC = "mono"
-AUDIO_FRAME_TYPE = "arena_auditory_msgs/msg/AudioFrame"
+AUDIO_FRAME_TYPE = "arena_robots_msgs/msg/AudioFrame"
 EVENT_GATHER_S = 1.0
 CENTROID = -1
 STEREO_NAMES = ("left", "right")

@@ -128,6 +128,7 @@ def test_robot_agent_id_fits_int32_and_stays_negative() -> None:
 
 
 @pytest.mark.parametrize("robot_emitter", ["procedural"], indirect=True)
+@pytest.mark.usefixtures("default_sounds")
 def test_procedural_motor_repeats_its_inactive_state_until_active_again(robot_emitter) -> None:
     import rclpy
 
@@ -160,6 +161,7 @@ def test_procedural_motor_repeats_its_inactive_state_until_active_again(robot_em
 
 
 @pytest.mark.parametrize("robot_emitter", ["wav"], indirect=True)
+@pytest.mark.usefixtures("default_sounds")
 def test_wav_motor_publishes_the_motor_loop(robot_emitter) -> None:
     import rclpy
 
@@ -177,10 +179,9 @@ def test_wav_motor_publishes_the_motor_loop(robot_emitter) -> None:
 def test_motor_sound_publishes_cone_and_clears_it(robot_emitter) -> None:
     import rclpy
     from arena_rclpy_mixins.qos import reliable
+    from arena_simulation_setup.tree.assets.sound_catalog import SoundLibrary
     from rclpy.parameter import Parameter
     from visualization_msgs.msg import Marker, MarkerArray
-
-    from arena_auditory.assets import SoundLibrary
 
     motor, consumer, namespace, suffix, _tick, _states = robot_emitter
     base_frame = f"robot1_{suffix}/base_link"

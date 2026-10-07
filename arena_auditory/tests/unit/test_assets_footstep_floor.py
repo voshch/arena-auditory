@@ -4,20 +4,20 @@ from pathlib import Path
 
 import pytest
 import yaml
+from arena_simulation_setup.tree.assets.Sound import SoundIdentifier
+from arena_simulation_setup.tree.assets.sound_catalog import SoundAsset, parse_manifest
 
-from arena_auditory.assets import SoundAsset, parse_manifest, pattern_matches
 from arena_auditory.materials import AcousticMaterialCatalog
-
-PACKAGE = Path(__file__).resolve().parents[2]
-FOOTSTEP_DIR = PACKAGE / "sounds" / "Common" / "Sound" / "footstep"
 
 
 def _footstep() -> SoundAsset:
-    asset, kinds = parse_manifest("footstep", FOOTSTEP_DIR, yaml.safe_load((FOOTSTEP_DIR / "footstep.yaml").read_text(encoding="utf-8")))
+    view = SoundIdentifier.parse("footstep").resolve_sync()
+    asset, kinds = parse_manifest("footstep", view.path, view.manifest)
     assert kinds == {}
     return asset
 
 
+@pytest.mark.usefixtures("default_sounds")
 @pytest.mark.parametrize(
     ("material_name", "variant_id"),
     [
@@ -38,18 +38,20 @@ def _footstep() -> SoundAsset:
         ("", "footstep_default_01"),
     ],
 )
-def test_bundled_footstep_matches_the_floor_material(material_name: str, variant_id: str) -> None:
+def test_footstep_matches_the_floor_material(material_name: str, variant_id: str) -> None:
     footstep = _footstep()
 
     for seed in range(4):
         assert footstep.select(context={"floor": material_name}, seed=seed).id == variant_id
 
 
+@pytest.mark.usefixtures("default_sounds")
 def test_footstep_without_a_floor_in_context_plays_the_default() -> None:
     assert _footstep().select(context={}, seed=11).id == "footstep_default_01"
 
 
-def test_bundled_footstep_is_a_floor_surface_pedestrian_clip() -> None:
+@pytest.mark.usefixtures("default_sounds")
+def test_footstep_is_a_floor_surface_pedestrian_clip() -> None:
     footstep = _footstep()
 
     assert footstep.kind == "footstep"
@@ -58,20 +60,6 @@ def test_bundled_footstep_is_a_floor_surface_pedestrian_clip() -> None:
     assert footstep.level_db == 45.0
     assert {variant.model for variant in footstep.variants} == {"wav"}
     assert all(variant.path is not None and variant.path.is_file() for variant in footstep.variants)
-
-
-@pytest.mark.parametrize(
-    ("pattern", "value", "matches"),
-    [
-        ("oak", "Common/Material/Oak_Planks", True),
-        ("oak", "Cloak_Room_Floor", False),
-        ("ceramic_*", "Common/Material/Ceramic_Tile_6", True),
-        ("ceramic_?", "Ceramic_Tile_6", False),
-        ("oak", "", False),
-    ],
-)
-def test_pattern_matches_whole_words_or_globs_on_the_leaf(pattern: str, value: str, matches: bool) -> None:
-    assert pattern_matches(pattern, value) is matches
 
 
 def test_floor_surface_damping_follows_the_material_absorption(tmp_path: Path) -> None:

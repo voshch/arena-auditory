@@ -10,7 +10,9 @@ def _tree(directory: str) -> list[tuple[str, list[str]]]:
     files: dict[str, list[str]] = {}
     for root, _, names in os.walk(directory):
         for name in sorted(names):
-            files.setdefault(os.path.join('share', package_name, root), []).append(os.path.join(root, name))
+            path = os.path.join(root, name)
+            if os.path.isfile(path):
+                files.setdefault(os.path.join('share', package_name, root), []).append(path)
     return sorted(files.items())
 
 
@@ -22,8 +24,7 @@ setup(
         ('share/ament_index/resource_index/packages', ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
         *_tree('config'),
-        *_tree('sounds'),
-        (os.path.join('share', package_name, 'launch'), glob('launch/*.launch.py')),
+        (os.path.join('share', package_name, 'launch'), [path for path in glob('launch/*.launch.py') if os.path.isfile(path)]),
     ],
     zip_safe=True,
     maintainer='voshch',
@@ -37,13 +38,7 @@ setup(
             'renderer = arena_auditory.renderer_node:main',
             'human_emitter = arena_auditory.human_emitter_node:main',
             'robot_emitter = arena_auditory.robot_emitter_node:main',
-            'robot_hearing_node = arena_auditory.hearing.bus_node:main',
-            'hearing_belief_node = arena_auditory.hearing.belief_node:main',
-            'hearing_policy = arena_auditory.hearing.policy_node:main',
-            'hearing_seld_frontend = arena_auditory.hearing.seld_frontend_node:main',
-            'hearing_srp_frontend = arena_auditory.hearing.srp_frontend_node:main',
-            'hearing_setup = arena_auditory.hearing.weights:main',
-            'hearing_audio_replay = arena_auditory.hearing.audio_replay:main',
+            'robot_hearing_node = arena_auditory.bus_node:main',
             'auditory_offline_render = arena_auditory.offline_render:main',
             'acoustic_world_audit = arena_auditory.acoustic_audit:main',
             'microphone_diagnostic = arena_auditory.microphone_diagnostic:main',

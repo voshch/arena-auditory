@@ -165,13 +165,13 @@ class _Scene:
             node.destroy_node()
 
 
-def test_auditory_round_trip_greeting_reaches_robot_marker(rclpy_context, loop) -> None:
+def test_auditory_round_trip_greeting_reaches_robot_marker(rclpy_context, default_sounds, loop) -> None:
     from arena_auditory_msgs.msg import HeardSoundEvent
     from arena_people_msgs.msg import Pedestrians
     from arena_rclpy_mixins.qos import reliable
     from visualization_msgs.msg import Marker
 
-    from arena_auditory.hearing.bus_node import BusNode
+    from arena_auditory.bus_node import BusNode
     from arena_auditory.human_emitter_node import HumanEmitterNode
 
     scene = _Scene(loop, robot="robot1", robot_xy=(1.0, 0.0), array_spec="stereo")
@@ -231,15 +231,16 @@ def test_auditory_round_trip_greeting_reaches_robot_marker(rclpy_context, loop) 
         scene.destroy()
 
 
-def test_four_mic_array_renders_and_robot_hearing_hears_the_centroid(rclpy_context, loop) -> None:
+def test_four_mic_array_renders_and_robot_hearing_hears_the_centroid(rclpy_context, default_sounds, loop) -> None:
     from arena_auditory_msgs.msg import HeardSoundEvent, SoundEvent
     from arena_rclpy_mixins.qos import reliable
+    from arena_robots.audio import ArrayStream, load_array_spec
+    from arena_simulation_setup.tree.assets.sound_catalog import AgentKind
     from std_msgs.msg import Float32MultiArray
 
-    from arena_auditory.constants import ArrayStream
-    from arena_auditory.hearing.bus_node import BusNode
+    from arena_auditory.bus_node import BusNode
     from arena_auditory.renderer_node import RendererNode
-    from arena_auditory.shared import AgentKind, SourceSpec, load_array_spec
+    from arena_auditory.shared import SourceSpec
 
     scene = _Scene(loop, robot="jackal", robot_xy=(1.0, 0.0), array_spec="four_mic")
     try:
@@ -314,8 +315,9 @@ def test_four_mic_array_renders_and_robot_hearing_hears_the_centroid(rclpy_conte
 def test_static_sound_keeps_its_authored_height_through_propagation(rclpy_context, loop) -> None:
     from arena_auditory_msgs.msg import ContinuousAudioSourceState, ContinuousHeardSoundState
     from arena_rclpy_mixins.qos import best_effort
+    from arena_simulation_setup.tree.assets.sound_catalog import AgentKind
 
-    from arena_auditory.shared import AgentKind, SourceSpec
+    from arena_auditory.shared import SourceSpec
 
     source_height = 2.6
     scene = _Scene(loop, robot="robot1", robot_xy=(1.0, 0.0), array_spec="stereo")

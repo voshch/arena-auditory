@@ -6,16 +6,14 @@ from pathlib import Path
 import numpy as np
 import pytest
 import yaml
+from arena_simulation_setup.tree.assets.sound_catalog import AgentKind, SoundLibrary, kinds_file
 from scipy.io import wavfile
 
-from arena_auditory.assets import SampleDecoder, SoundLibrary
+from arena_auditory.assets import SampleDecoder
 from arena_auditory.render.core import ContinuousInput, ImpulseShape, RenderInputs, RenderParams, new_state, render_block
 from arena_auditory.render.dsp import PartitionedConvolver
-from arena_auditory.shared import AgentKind, SourceSpec
+from arena_auditory.shared import SourceSpec
 from arena_auditory.sources import SOURCE_MODELS, BufferProgram, ProgramContext, streamed
-
-KINDS_FILE = Path(__file__).resolve().parents[2] / "config" / "sounds.yaml"
-
 
 @pytest.fixture
 def library(tmp_path: Path) -> Iterator[SoundLibrary]:
@@ -32,7 +30,7 @@ def library(tmp_path: Path) -> Iterator[SoundLibrary]:
         "variants": [{"id": "step_01", "file": "step.wav"}, {"id": "hum_01", "file": "hum.wav", "model": "wav_loop"}],
     }
     (directory / "tmp_steps.yaml").write_text(yaml.safe_dump(manifest), encoding="utf-8")
-    library = SoundLibrary([KINDS_FILE])
+    library = SoundLibrary([kinds_file()])
     library.use_world(tmp_path / "world")
     try:
         yield library

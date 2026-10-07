@@ -76,8 +76,9 @@ def _robot_fleet(robot_name: str, namespace: str, frame: str):
 
 def _heard(listener_id: str, *, event_id: str = "human:1:bus", audible: bool = True, received_db: float = 45.0, threshold_db: float = 20.0):
     from arena_auditory_msgs.msg import HeardSoundEvent
+    from arena_simulation_setup.tree.assets.sound_catalog import AgentKind
 
-    from arena_auditory.shared import AgentKind, SourceSpec
+    from arena_auditory.shared import SourceSpec
 
     event = HeardSoundEvent()
     event.header.frame_id = "map"
@@ -106,21 +107,22 @@ def _heard(listener_id: str, *, event_id: str = "human:1:bus", audible: bool = T
 @pytest.fixture
 def bus(rclpy_context, loop):
     import rclpy
-    from arena_auditory_msgs.msg import AuditoryDetection, HeardSoundEvent
+    from arena_auditory_msgs.msg import HeardSoundEvent
     from arena_rclpy_mixins.qos import reliable
+    from arena_robots_msgs.msg import SoundDetection
     from visualization_msgs.msg import Marker
 
-    from arena_auditory.hearing.bus_node import BusNode
+    from arena_auditory.bus_node import BusNode
 
     suffix = uuid.uuid4().hex[:8]
     namespace = f"/test_{suffix}"
     node = _build(loop, BusNode, namespace, {"bus.delay.enabled": False})
     consumer = rclpy.create_node(f"bus_consumer_{suffix}", namespace=namespace)
     heard: list[HeardSoundEvent] = []
-    found: list[AuditoryDetection] = []
+    found: list[SoundDetection] = []
     markers: list[Marker] = []
     consumer.create_subscription(HeardSoundEvent, f"{namespace}/jackal/heard_sound", heard.append, reliable(50))
-    consumer.create_subscription(AuditoryDetection, f"{namespace}/jackal/hearing/bus/detections", found.append, reliable(50))
+    consumer.create_subscription(SoundDetection, f"{namespace}/jackal/hearing/bus/detections", found.append, reliable(50))
     consumer.create_subscription(Marker, f"{namespace}/jackal/heard_sound_marker", markers.append, reliable(10))
     node._cb_fleet(_robot_fleet("jackal", f"{namespace}/jackal", f"jackal_{suffix}"))
     outputs = node._robots["jackal"]
@@ -153,7 +155,6 @@ def test_robot_listener_reception_becomes_heard_sound_detection_and_marker(bus) 
     assert detection.frontend == "bus"
     assert detection.kind == "speech"
     assert detection.event_id == "human:1:four-mic-regression"
-    assert detection.listener_id == "robot:jackal"
     assert detection.azimuth_rad == pytest.approx(2.356, abs=1e-5)
     assert detection.level_db == pytest.approx(45.0)
 

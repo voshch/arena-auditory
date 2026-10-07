@@ -6,10 +6,9 @@ import array
 import math
 
 import numpy as np
+from arena_robots.audio import rms_from_dbfs, spl_to_dbfs
 from numpy.typing import NDArray
 from scipy.signal import resample_poly
-
-from arena_auditory.shared import rms_from_dbfs, spl_to_dbfs
 
 
 def mems_gain(received_spl_db: float, level_rms: float, *, sensitivity_dbfs_at_94_dbspl: float = -26.0) -> float:
@@ -116,37 +115,6 @@ def ramped_read(
     output[valid_lower] += source[lower[valid_lower]] * (1.0 - fraction[valid_lower])
     output[valid_upper] += source[upper[valid_upper]] * fraction[valid_upper]
     return output
-
-
-def gcc_phat(
-    signal: NDArray[np.floating],
-    reference: NDArray[np.floating],
-    *,
-    sample_rate_hz: int,
-    max_tau_s: float | None = None,
-    interpolation: int = 8,
-) -> tuple[float, float]:
-    """Signal-minus-reference delay in seconds and normalized peak confidence."""
-    sig = np.asarray(signal, dtype=np.float64)
-    ref = np.asarray(reference, dtype=np.float64)
-    if sig.size == 0 or ref.size == 0 or sample_rate_hz <= 0:
-        return 0.0, 0.0
-    n = sig.size + ref.size
-    spectrum = np.fft.rfft(sig, n=n) * np.conj(np.fft.rfft(ref, n=n))
-    magnitude = np.abs(spectrum)
-    spectrum /= np.maximum(magnitude, 1e-15)
-    correlation = np.fft.irfft(spectrum, n=interpolation * n)
-    maximum_shift = interpolation * n // 2
-    if max_tau_s is not None:
-        maximum_shift = min(
-            maximum_shift,
-            int(interpolation * sample_rate_hz * max_tau_s),
-        )
-    correlation = np.concatenate((correlation[-maximum_shift:], correlation[: maximum_shift + 1]))
-    peak_index = int(np.argmax(np.abs(correlation)))
-    shift = peak_index - maximum_shift
-    confidence = float(np.abs(correlation[peak_index]))
-    return shift / float(interpolation * sample_rate_hz), confidence
 
 
 class PartitionedConvolver:

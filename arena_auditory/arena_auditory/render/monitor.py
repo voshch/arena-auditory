@@ -6,9 +6,8 @@ from collections.abc import Sequence
 
 import attrs
 import numpy as np
+from arena_robots.audio import ArraySpec, rms
 from numpy.typing import NDArray
-
-from arena_auditory.shared import ArraySpec, rms
 
 
 @attrs.frozen(kw_only=True)

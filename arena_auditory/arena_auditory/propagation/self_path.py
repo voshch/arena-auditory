@@ -5,8 +5,9 @@ from __future__ import annotations
 import math
 import typing
 
+from arena_robots.audio import SPEED_OF_SOUND_MPS
+
 from arena_auditory.propagation import Emission, Listener, PropagationConfig, PropagationScene, Reception, bearing_rad
-from arena_auditory.shared import SPEED_OF_SOUND_MPS
 
 MIN_SELF_DISTANCE_M = 0.01
 

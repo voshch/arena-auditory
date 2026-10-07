@@ -1,20 +1,16 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 import attrs
 import numpy as np
 import pytest
-import yaml
+from arena_simulation_setup.tree.assets.Sound import SoundIdentifier
+from arena_simulation_setup.tree.assets.sound_catalog import AgentKind, parse_manifest
 
-from arena_auditory.assets import parse_manifest
 from arena_auditory.params import MotorGroup
-from arena_auditory.shared import AgentKind, SourceSpec
+from arena_auditory.shared import SourceSpec
 from arena_auditory.sources import stream_model, streamed, tuning_of
 from arena_auditory.sources.drivetrain import JACKAL, DrivetrainSpec, DrivetrainVoice, cache_bytes, clear_cache
 from arena_auditory.sources.drivetrain.program import LEFT_VELOCITY, RIGHT_VELOCITY, DrivetrainModel, DrivetrainProgram, drivetrain_spec, wheel_state
-
-MOTOR_DIR = Path(__file__).resolve().parents[2] / "sounds" / "Common" / "Sound" / "motor"
 
 
 def _tuning(**overrides: float) -> dict[str, float]:
@@ -114,8 +110,10 @@ def test_drivetrain_runtime_tuning_changes_pitch_and_tonal_level() -> None:
     np.testing.assert_allclose(np.sqrt(np.mean(tuned**2)), np.sqrt(np.mean(baseline**2)) * 10.0 ** (-12.0 / 20.0), rtol=0.01)
 
 
+@pytest.mark.usefixtures("default_sounds")
 def test_motor_asset_level_is_45_db_at_1_m_for_every_variant_at_zero_trim() -> None:
-    asset, _ = parse_manifest("motor", MOTOR_DIR, yaml.safe_load((MOTOR_DIR / "motor.yaml").read_text(encoding="utf-8")))
+    view = SoundIdentifier.parse("motor").resolve_sync()
+    asset, _ = parse_manifest("motor", view.path, view.manifest)
     drivetrain = asset.variant("jackal_drivetrain")
 
     assert asset.level_db == 45.0

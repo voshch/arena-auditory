@@ -54,8 +54,9 @@ def _spin_until(rclpy, nodes, predicate, timeout_sec: float = 5.0) -> None:
 
 def _heard(listener_id: str, *, source_x: float = 0.0):
     from arena_auditory_msgs.msg import HeardSoundEvent
+    from arena_simulation_setup.tree.assets.sound_catalog import AgentKind
 
-    from arena_auditory.shared import AgentKind, SourceSpec
+    from arena_auditory.shared import SourceSpec
 
     event = HeardSoundEvent()
     event.header.frame_id = "map"
@@ -163,9 +164,10 @@ def test_environment_source_marker_sits_at_the_authored_height(rclpy_context, lo
     import rclpy
     from arena_auditory_msgs.msg import ContinuousAudioSourceState
     from arena_rclpy_mixins.qos import latched
+    from arena_simulation_setup.tree.assets.sound_catalog import AgentKind
     from visualization_msgs.msg import MarkerArray
 
-    from arena_auditory.shared import AgentKind, SourceSpec
+    from arena_auditory.shared import SourceSpec
     from arena_auditory.visualizer_node import SoundPropagationVisualizer
 
     suffix = uuid.uuid4().hex[:8]

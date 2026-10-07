@@ -7,8 +7,9 @@ import typing
 from arena_auditory.sources import BufferProgram
 
 if typing.TYPE_CHECKING:
-    from arena_auditory.assets import SoundAsset, Variant
-    from arena_auditory.params import ParamGroup
+    from arena_rclpy_mixins.param_groups import ParamGroup
+    from arena_simulation_setup.tree.assets.sound_catalog import SoundAsset, Variant
+
     from arena_auditory.shared import SourceSpec
     from arena_auditory.sources import ProgramContext
 

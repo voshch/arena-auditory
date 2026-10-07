@@ -4,10 +4,10 @@ import math
 from pathlib import Path
 
 import pytest
+from arena_robots.audio import SPEED_OF_SOUND_MPS
 
 from arena_auditory.materials import AcousticMaterialCatalog
 from arena_auditory.propagation.level3 import Level3Propagation
-from arena_auditory.shared import SPEED_OF_SOUND_MPS
 from arena_auditory.world import AcousticScene, AcousticWall
 
 CATALOG_PATH = Path(__file__).resolve().parents[2] / "config" / "acoustic_materials.yaml"

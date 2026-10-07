@@ -13,8 +13,8 @@ from arena_auditory.render.monitor import (
     monitor_stereo,
     tdoa_pairs,
 )
-from arena_auditory.shared import ArraySpec, MicSpec, geometric_delays_s, rectangular
 from arena_auditory.sources.drivetrain.program import LEFT_VELOCITY, RIGHT_VELOCITY
+from arena_robots.audio import ArraySpec, MicSpec, geometric_delays_s, rectangular
 
 FOUR_MIC = ArraySpec(
     name="four_mic",

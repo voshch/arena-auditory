@@ -108,7 +108,7 @@ is_number "$EPISODE_FINALIZE_TIMEOUT" || die '--episode-finalize-timeout must be
 
 for arg in "${EXTRA_LAUNCH_ARGS[@]}"; do
     case "$arg" in
-        sim:=*|world:=*|robot:=*|human:=*|auditory:=*|auditory.output.device:=*|auditory.array.spec:=*|auditory.motor.enabled:=*|auditory.motor.model:=*|task.robots:=*|task.obstacles:=*|task.scenario:=*|task.scenario.file:=*|task.scenario.linger_after_completion:=*|task.episode.auto_reset:=*|env.n:=*|viz:=*|headless:=*|record.dir:=*|record.auto:=*)
+        sim:=*|world:=*|robot:=*|human:=*|acoustics:=*|auditory.output.device:=*|auditory.array.spec:=*|auditory.motor.enabled:=*|auditory.motor.model:=*|task.robots:=*|task.obstacles:=*|task.scenario:=*|task.scenario.file:=*|task.scenario.linger_after_completion:=*|task.episode.auto_reset:=*|env.n:=*|viz:=*|headless:=*|record.dir:=*|record.auto:=*)
             die "the script owns launch argument '$arg'"
             ;;
     esac
@@ -287,7 +287,7 @@ for scenario_file in "${SCENARIO_FILES[@]}"; do
         display_args=('viz:=false' 'headless:=true')
     fi
     launch_args=(
-        "sim:=${SIMULATOR}" "world:=${world_name}" "robot:=${ROBOT}" 'human:=arena' 'auditory:=arena'
+        "sim:=${SIMULATOR}" "world:=${world_name}" "robot:=${ROBOT}" 'human:=arena' 'acoustics:=arena'
         'auditory.array.spec:=four_mic' "auditory.output.device:=${PLAYBACK_DEVICE}"
         'auditory.motor.enabled:=true' 'auditory.motor.model:=procedural'
         'task.robots:=scenario' 'task.obstacles:=scenario' "task.scenario.file:=${scenario_name}"
@@ -324,7 +324,7 @@ for scenario_file in "${SCENARIO_FILES[@]}"; do
                     topic="${env_namespace}/${robot}/audio/${stream}"
                     if [[ "$stream" == raw_array ]]; then live="${raw_live[$robot]:-0}"; else live="${rendered_live[$robot]:-0}"; fi
                     if ((live == 0)) \
-                        && [[ "$(ros2 topic type "$topic" 2>/dev/null || true)" == 'arena_auditory_msgs/msg/AudioFrame' ]] \
+                        && [[ "$(ros2 topic type "$topic" 2>/dev/null || true)" == 'arena_robots_msgs/msg/AudioFrame' ]] \
                         && timeout 3 ros2 topic echo --once "$topic" >/dev/null 2>&1; then
                         live=1
                         if [[ "$stream" == raw_array ]]; then raw_live[$robot]=1; else rendered_live[$robot]=1; fi

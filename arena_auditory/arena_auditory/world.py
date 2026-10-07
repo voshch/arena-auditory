@@ -14,6 +14,7 @@ import numpy as np
 import shapely
 import shapely.errors
 import yaml
+from arena_robots.audio import Vec3
 from arena_simulation_setup.tree.World import (
     MICROPHONE_PLACEMENT_TOLERANCE_M,
     LevelDescription,
@@ -32,7 +33,7 @@ from arena_auditory.rooms import (
     UnpairedDoor,
     world_zones,
 )
-from arena_auditory.shared import ListenerId, Vec3
+from arena_auditory.shared import ListenerId
 
 if typing.TYPE_CHECKING:
     from nav_msgs.msg import OccupancyGrid

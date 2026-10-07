@@ -72,7 +72,7 @@ void SpawnSoundTool::updateClient()
   if (!service_node_) {
     return;
   }
-  client_ = service_node_->create_client<arena_auditory_msgs::srv::SpawnSound>(
+  client_ = service_node_->create_client<task_generator_msgs::srv::SpawnSound>(
     target_node_property_->getStdString() + "/runtime/spawn_sound");
 }
 
@@ -82,7 +82,7 @@ void SpawnSoundTool::onPoseSet(double x, double y, double theta)
     updateClient();
   }
 
-  auto request = std::make_shared<arena_auditory_msgs::srv::SpawnSound::Request>();
+  auto request = std::make_shared<task_generator_msgs::srv::SpawnSound::Request>();
   request->pose.header.frame_id = context_->getFixedFrame().toStdString();
   request->pose.header.stamp = service_node_->now();
   request->pose.pose.position.x = x;
@@ -109,7 +109,7 @@ void SpawnSoundTool::onPoseSet(double x, double y, double theta)
   client_->async_send_request(
     request,
     [logger, kind = request->kind](
-      rclcpp::Client<arena_auditory_msgs::srv::SpawnSound>::SharedFuture future)
+      rclcpp::Client<task_generator_msgs::srv::SpawnSound>::SharedFuture future)
     {
       try {
         const auto response = future.get();

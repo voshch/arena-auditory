@@ -11,17 +11,19 @@ from arena_people_msgs.msg import Pedestrian, Pedestrians
 from arena_rclpy_mixins import ArenaMixinNode
 from arena_rclpy_mixins.lazy import LazyPublisher
 from arena_rclpy_mixins.qos import reliable
+from arena_robots.audio import NS_PER_S
+from arena_simulation_setup.tree.assets.sound_catalog import AgentKind, SoundLibrary, selection_seed
 from arena_simulation_setup.utils.geometry import Orientation
 from builtin_interfaces.msg import Duration, Time
 from geometry_msgs.msg import Point
 from std_msgs.msg import ColorRGBA
 from visualization_msgs.msg import Marker, MarkerArray
 
-from arena_auditory.assets import SoundLibrary, selection_seed
+from arena_auditory.assets import duration_s
 from arena_auditory.constants import ARENA_PEDS, PEDESTRIAN_MARKERS_EXTRA, SOUND_EVENTS, env_topic
 from arena_auditory.materials import default_catalog
 from arena_auditory.params import Configuration
-from arena_auditory.shared import NS_PER_S, AgentKind, SourceSpec
+from arena_auditory.shared import SourceSpec
 from arena_auditory.sources import PedestrianEventDetector, PedestrianState
 from arena_auditory.world import AcousticWorld
 from arena_auditory.world_tracker import WorldTracker
@@ -103,7 +105,7 @@ class HumanEmitterNode(ArenaMixinNode):
             asset = self._library.default_asset(kind_name)
             seed = selection_seed(self._tracker.episode_seed, ped.id, kind_name, self._occurrence(ped.id, kind_name))
             variant = asset.select(context={"floor": floor}, seed=seed)
-            duration_s = self._library.duration_s(asset.id, variant.id)
+            length_s = duration_s(self._library, asset.id, variant.id)
         except (LookupError, ValueError, OSError) as exc:
             self.get_logger().error(f"no {kind_name} sound: {exc}", throttle_duration_sec=5.0)
             return
@@ -125,7 +127,7 @@ class HumanEmitterNode(ArenaMixinNode):
             yaw_rad=ped.yaw_rad,
             level_db=level_db,
             reference_distance_m=asset.reference_distance_m,
-            duration_ns=round(duration_s * NS_PER_S),
+            duration_ns=round(length_s * NS_PER_S),
             loop=asset.loop,
             seed=seed,
         )

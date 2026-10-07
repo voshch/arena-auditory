@@ -5,12 +5,15 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from arena_rclpy_mixins.param_groups import configure
+from arena_robots.audio import SPEED_OF_SOUND_MPS
+from arena_simulation_setup.tree.assets.sound_catalog import AgentKind
 
 from arena_auditory.materials import AcousticMaterialCatalog
-from arena_auditory.params import BackendName, Level3Group, PortalGroup, PropagationGroup, RirGroup, configure
+from arena_auditory.params import BackendName, Level3Group, PortalGroup, PropagationGroup, RirGroup
 from arena_auditory.propagation import Emission, Listener, PortalConfig, PropagationConfig, PropagationScene, Propagator, RirConfig
 from arena_auditory.propagation.self_path import MIN_SELF_DISTANCE_M, SelfPathBackend
-from arena_auditory.shared import SPEED_OF_SOUND_MPS, AgentKind, ListenerId
+from arena_auditory.shared import ListenerId
 from arena_auditory.world import OccupancyMap
 
 CATALOG_PATH = Path(__file__).resolve().parents[2] / "config" / "acoustic_materials.yaml"

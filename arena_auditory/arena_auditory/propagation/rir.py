@@ -11,11 +11,11 @@ from collections.abc import Sequence
 import attrs
 import numpy as np
 from arena_auditory_msgs.msg import RoomImpulse
+from arena_robots.audio import Vec3
 from builtin_interfaces.msg import Time
 from std_msgs.msg import Header
 
 from arena_auditory.propagation.pyroom_adapter import RoomImpulseResponse, direct_arrival
-from arena_auditory.shared import Vec3
 
 IMPULSE_WINDOW = 64
 

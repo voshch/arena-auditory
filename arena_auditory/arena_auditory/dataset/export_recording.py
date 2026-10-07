@@ -19,8 +19,9 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 import yaml
+from arena_robots.audio import ArrayStream
 
-from arena_auditory.constants import CONTINUOUS_HEARD_SOUNDS, SOUND_EVENTS, ArrayStream
+from arena_auditory.constants import CONTINUOUS_HEARD_SOUNDS, SOUND_EVENTS
 
 PCM_S16LE = 1
 PCM_F32LE = 2

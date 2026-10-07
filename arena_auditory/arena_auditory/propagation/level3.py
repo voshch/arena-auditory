@@ -7,10 +7,10 @@ import typing
 
 import attrs
 import shapely
+from arena_robots.audio import SPEED_OF_SOUND_MPS, Vec3
 
 from arena_auditory.materials import AcousticMaterialCatalog
 from arena_auditory.propagation import EarlyPath, Emission, Listener, PropagationConfig, PropagationScene, Reception, bearing_rad
-from arena_auditory.shared import SPEED_OF_SOUND_MPS, Vec3
 from arena_auditory.world import AcousticScene, AcousticWall, AcousticZone
 
 

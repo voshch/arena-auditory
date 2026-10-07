@@ -10,7 +10,9 @@ from dataclasses import dataclass
 from typing import Any
 
 import rclpy
-from arena_auditory_msgs.msg import AudioFrame, HeardSoundEvent
+from arena_auditory_msgs.msg import HeardSoundEvent
+from arena_robots.audio import ArrayStream, array_stream
+from arena_robots_msgs.msg import AudioFrame
 from geometry_msgs.msg import Point
 from rclpy.action import ActionClient
 from rclpy.node import Node
@@ -20,7 +22,7 @@ from rosgraph_msgs.msg import Clock
 from task_generator_msgs.action import RunEpisode
 from task_generator_msgs.msg import EpisodeRecord, RobotFleet
 
-from arena_auditory.constants import HEARD_SOUND_EVENTS, STATE_ROBOTS, ArrayStream, array_stream
+from arena_auditory.constants import HEARD_SOUND_EVENTS, STATE_ROBOTS
 from arena_auditory.shared import ListenerId
 
 

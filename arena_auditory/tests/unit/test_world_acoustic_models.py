@@ -4,10 +4,11 @@ from pathlib import Path
 
 import attrs
 import yaml
+from arena_rclpy_mixins.param_groups import configure
 from arena_simulation_setup.tree.World import Level, MultiLevelWorldView, WorldDescription, WorldIdentifier
 from shapely.geometry import Polygon
 
-from arena_auditory.params import PortalGroup, WorldGroup, configure
+from arena_auditory.params import PortalGroup, WorldGroup
 from arena_auditory.propagation.portal import PortalConfig
 from arena_auditory.rooms import AcousticPortalRoute, AcousticRoomSpec, AcousticRoomSpecBuilder, AcousticWorldGraph
 from arena_auditory.world import AcousticScene, AcousticZone, WorldConfig, compact_authored_world

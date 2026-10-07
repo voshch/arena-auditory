@@ -4,13 +4,15 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from arena_rclpy_mixins.param_groups import configure
+from arena_simulation_setup.tree.assets.sound_catalog import AgentKind
 
 from arena_auditory.materials import AcousticMaterialCatalog, default_catalog
-from arena_auditory.params import BackendName, Level3Group, PortalGroup, PropagationGroup, RirGroup, WorldGroup, configure
+from arena_auditory.params import BackendName, Level3Group, PortalGroup, PropagationGroup, RirGroup, WorldGroup
 from arena_auditory.propagation import LISTENER_ORDER, Emission, Listener, PortalConfig, PropagationConfig, PropagationScene, Propagator, RirConfig
 from arena_auditory.propagation.pyroom_adapter import PyroomacousticsAdapter, RirUnavailable, RoomImpulseResponse
 from arena_auditory.rooms import AcousticBoundarySpec, AcousticRoomSpec
-from arena_auditory.shared import AgentKind, ListenerId, ListenerKind
+from arena_auditory.shared import ListenerId, ListenerKind
 
 CATALOG_PATH = Path(__file__).resolve().parents[2] / "config" / "acoustic_materials.yaml"
 

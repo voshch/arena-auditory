@@ -5,9 +5,12 @@ from __future__ import annotations
 import math
 
 import attrs
-from arena_auditory_msgs.msg import AuditoryDetection, HeardSoundEvent
+from arena_auditory_msgs.msg import HeardSoundEvent
 from arena_rclpy_mixins import ArenaMixinNode, qos
 from arena_rclpy_mixins.lazy import LazyPublisher
+from arena_robots.fleet import robot_bindings
+from arena_robots_msgs.msg import SoundDetection
+from arena_simulation_setup.tree.assets.sound_catalog import AgentKind, SoundLibrary
 from rclpy.duration import Duration
 from rclpy.publisher import Publisher
 from rclpy.time import Time
@@ -15,10 +18,9 @@ from std_msgs.msg import ColorRGBA, Header
 from task_generator_msgs.msg import RobotFleet
 from visualization_msgs.msg import Marker
 
-from arena_auditory.assets import SoundLibrary
-from arena_auditory.constants import HEARD_SOUND_EVENTS, STATE_ROBOTS, detections, heard_sound, heard_sound_marker
-from arena_auditory.params import Configuration, Frontend
-from arena_auditory.shared import AgentKind, ListenerId, ListenerKind, robot_bindings
+from arena_auditory.constants import BUS_FRONTEND, HEARD_SOUND_EVENTS, STATE_ROBOTS, detections, heard_sound, heard_sound_marker
+from arena_auditory.params import Configuration
+from arena_auditory.shared import ListenerId, ListenerKind
 
 RELEASE_PERIOD_S = 0.01
 
@@ -60,7 +62,7 @@ class BusNode(ArenaMixinNode):
             self._robots[binding.name] = _RobotOutputs(
                 base_frame=binding.base_frame,
                 heard=self.create_publisher(HeardSoundEvent, heard_sound(binding.name), qos.reliable(50)),
-                detections=self.create_publisher(AuditoryDetection, detections(binding.name, Frontend.BUS), qos.reliable(50)),
+                detections=self.create_publisher(SoundDetection, detections(binding.name, BUS_FRONTEND), qos.reliable(50)),
                 markers=LazyPublisher(self.create_publisher(Marker, heard_sound_marker(binding.name), qos.reliable(10))),
             )
             self.get_logger().info(f"registered robot hearing outputs for {binding.name!r} in frame {binding.base_frame!r}")
@@ -98,13 +100,12 @@ class BusNode(ArenaMixinNode):
             self._publish_marker(item.robot, outputs, item.msg)
 
     @staticmethod
-    def _detection(item: _Pending) -> AuditoryDetection:
+    def _detection(item: _Pending) -> SoundDetection:
         msg = item.msg
-        return AuditoryDetection(
+        return SoundDetection(
             header=Header(stamp=item.release.to_msg(), frame_id=msg.header.frame_id),
             robot=item.robot,
-            listener_id=msg.reception.listener_id,
-            frontend=Frontend.BUS.value,
+            frontend=BUS_FRONTEND,
             kind=msg.source.kind,
             event_id=msg.source.id,
             azimuth_rad=float(msg.reception.bearing_rad),

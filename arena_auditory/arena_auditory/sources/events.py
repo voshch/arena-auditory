@@ -7,8 +7,7 @@ from collections.abc import Callable, Sequence
 
 import attrs
 import numpy as np
-
-from arena_auditory.shared import Vec3
+from arena_robots.audio import Vec3
 
 FOOTSTEP = "footstep"
 SPEECH = "speech"

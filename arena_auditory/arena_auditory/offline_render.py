@@ -20,11 +20,13 @@ from pathlib import Path
 import numpy as np
 import numpy.typing as npt
 import yaml
+from arena_robots.audio import ArrayStream
+from arena_simulation_setup.tree.assets.sound_catalog import SoundLibrary, split_sample_key
 from mcap.exceptions import McapError
 from scipy.io import wavfile
 
-from arena_auditory.assets import DecodedSample, SampleDecoder, SoundLibrary, local_sound_dirs, split_sample_key
-from arena_auditory.constants import ROOM_IMPULSES, ArrayStream
+from arena_auditory.assets import DecodedSample, SampleDecoder
+from arena_auditory.constants import ROOM_IMPULSES
 from arena_auditory.params import RenderGroup
 from arena_auditory.render.core import (
     V1_CHANNELS,
@@ -202,9 +204,9 @@ def read_episode_trace(path: Path, *, robot: str = "", full_audio: bool = True) 
 
 
 def legacy_owner(library: SoundLibrary, variant_id: str) -> str:
-    """The local sound asset owning a bare variant id, the sample key of traces recorded before keys carried the asset id. Raises KeyError unless exactly one owns it."""
+    """The sound asset owning a bare variant id, the sample key of traces recorded before keys carried the asset id. Raises KeyError unless exactly one owns it."""
     owners = []
-    for asset_id in local_sound_dirs():
+    for asset_id in library.known_asset_ids():
         try:
             asset = library.asset(asset_id)
         except (KeyError, ValueError, FileNotFoundError):
@@ -212,7 +214,7 @@ def legacy_owner(library: SoundLibrary, variant_id: str) -> str:
         if any(variant.id == variant_id for variant in asset.variants):
             owners.append(asset.id)
     if len(owners) != 1:
-        raise KeyError(f"legacy sample key {variant_id!r} needs exactly one local sound asset with that variant, found {owners}")
+        raise KeyError(f"legacy sample key {variant_id!r} needs exactly one sound asset with that variant, found {owners}")
     return owners[0]
 
 
@@ -426,7 +428,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--out", type=Path, default=None, help="directory for render/remix wavs (default: beside each recording)")
     parser.add_argument("--attenuate-db", type=float, default=0.0, metavar="DB", help="remix: attenuation applied to the motor stem, in dB (0 reproduces the original mix)")
     parser.add_argument("--robot", default="", help="robot name, needed only when a recording carries more than one")
-    parser.add_argument("--world", type=Path, default=None, help="world directory whose world-local sounds the recording used (default: package and shared sounds only)")
+    parser.add_argument("--world", type=Path, default=None, help="world directory whose world-local sounds the recording used (default: shared and bucket sounds only)")
     parser.add_argument("--sample-rate", type=int, default=0, metavar="HZ", help="override the sample rate read from the recorded audio")
     parser.add_argument("--block-size", type=int, default=0, metavar="FRAMES", help="override the block size read from the recorded audio")
     parser.add_argument("--rir-crossfade-s", type=float, default=float(RenderGroup.RIR_CROSSFADE_S.default), metavar="S", help="render.rir.crossfade_s of the recording, used when room impulses change key (default: the renderer default)")

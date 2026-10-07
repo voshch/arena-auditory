@@ -8,7 +8,7 @@
 #include <rclcpp/rclcpp.hpp>
 #include <rviz_default_plugins/tools/pose/pose_tool.hpp>
 
-#include "arena_auditory_msgs/srv/spawn_sound.hpp"
+#include "task_generator_msgs/srv/spawn_sound.hpp"
 
 namespace rviz_common
 {
@@ -49,7 +49,7 @@ private:
   rviz_common::properties::BoolProperty * initially_active_property_;
 
   std::shared_ptr<rclcpp::Node> service_node_;
-  rclcpp::Client<arena_auditory_msgs::srv::SpawnSound>::SharedPtr client_;
+  rclcpp::Client<task_generator_msgs::srv::SpawnSound>::SharedPtr client_;
 };
 }  // namespace arena_auditory_viz
 

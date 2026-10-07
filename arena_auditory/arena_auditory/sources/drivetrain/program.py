@@ -8,17 +8,20 @@ import typing
 from collections.abc import Mapping
 
 import numpy as np
+from arena_robots.audio import rms
+from arena_simulation_setup.tree.assets.sound_catalog import AgentKind
 
 from arena_auditory.params import MotorGroup
-from arena_auditory.shared import AgentKind, SourceSpec, rms
+from arena_auditory.shared import SourceSpec
 from arena_auditory.sources import tuning_of
 from arena_auditory.sources.drivetrain.spec import JACKAL, DrivetrainSpec
 from arena_auditory.sources.drivetrain.voice import DrivetrainVoice
 from arena_auditory.sources.drivetrain.voice import prewarm as prewarm_field
 
 if typing.TYPE_CHECKING:
-    from arena_auditory.assets import SoundAsset, Variant
-    from arena_auditory.params import ParamGroup
+    from arena_rclpy_mixins.param_groups import ParamGroup
+    from arena_simulation_setup.tree.assets.sound_catalog import SoundAsset, Variant
+
     from arena_auditory.sources import ProgramContext
 
 DRIVETRAIN_FIELD_SEED = 0

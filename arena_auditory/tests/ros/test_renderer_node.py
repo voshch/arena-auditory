@@ -117,7 +117,7 @@ def test_sim_time_rendering_rides_the_node_clock_without_a_second_clock_subscrip
 )
 def test_each_clock_step_renders_one_block_on_raw_and_every_stem(spec_harness: Harness, block_size: int, sample_rate: int, names: list[str]) -> None:
     import rclpy
-    from arena_auditory_msgs.msg import AudioFrame
+    from arena_robots_msgs.msg import AudioFrame
     from rosgraph_msgs.msg import Clock
 
     node = spec_harness.node
@@ -182,6 +182,7 @@ def _drivetrain_state(seed: int, *, kind: str = "motor") -> object:
     )
 
 
+@pytest.mark.usefixtures("default_sounds")
 def test_drivetrain_seed_change_rebinds_the_source_on_the_prewarmed_field(array_harness: Harness) -> None:
     from arena_auditory.sources.drivetrain import cache_bytes
 
@@ -218,7 +219,7 @@ def test_output_switches_gate_their_stems_in_the_workstation_mix(array_harness: 
 
 
 @pytest.fixture
-def steady_harness(rclpy_context: object) -> Iterator[Harness]:
+def steady_harness(rclpy_context: object, default_sounds: object) -> Iterator[Harness]:
     harness = Harness(sim_time=False)
     harness.node._on_fleet(_fleet(harness.namespace))
     yield harness
@@ -320,7 +321,7 @@ def _impulse(key: str) -> object:
 
 
 @pytest.fixture
-def rir_harness(rclpy_context: object) -> Iterator[Harness]:
+def rir_harness(rclpy_context: object, default_sounds: object) -> Iterator[Harness]:
     harness = Harness(sim_time=False, extra={"render.rir.enabled": True})
     harness.node._on_fleet(_fleet(harness.namespace))
     yield harness

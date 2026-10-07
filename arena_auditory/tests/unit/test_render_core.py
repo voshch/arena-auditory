@@ -5,7 +5,6 @@ from dataclasses import replace
 
 import numpy as np
 import pytest
-from arena_auditory.assets import SoundLibrary
 from arena_auditory.render.core import (
     ClipInput,
     ContinuousInput,
@@ -20,7 +19,6 @@ from arena_auditory.render.core import (
     render_inputs_from_json,
     render_inputs_to_json,
 )
-from arena_auditory.shared import active_rms
 from arena_auditory.sources.drivetrain.program import (
     BROADBAND_GAIN_DB,
     FREQUENCY_SCALE,
@@ -31,6 +29,8 @@ from arena_auditory.sources.drivetrain.program import (
     TRIM_DB,
     VELOCITY_SMOOTHING_S,
 )
+from arena_robots.audio import active_rms
+from arena_simulation_setup.tree.assets.sound_catalog import SoundLibrary
 
 CHANNELS = 4
 _RENDER_BLOCK = 8

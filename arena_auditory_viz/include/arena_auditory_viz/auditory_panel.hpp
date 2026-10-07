@@ -8,7 +8,7 @@
 #include <rviz_common/ros_integration/ros_node_abstraction_iface.hpp>
 
 #include "arena_auditory_msgs/srv/remove_microphone.hpp"
-#include "arena_auditory_msgs/srv/remove_sound.hpp"
+#include "task_generator_msgs/srv/remove_sound.hpp"
 #include "task_generator_msgs/msg/episode_record.hpp"
 #include "task_generator_msgs/msg/semantic_snapshot.hpp"
 #include "task_generator_msgs/srv/set_semantic.hpp"
@@ -96,7 +96,7 @@ protected:
     std::shared_ptr<rclcpp::AsyncParametersClient> propagation_parameters_client;
     rclcpp::Client<task_generator_msgs::srv::SetSemantic>::SharedPtr set_semantic_client;
     rclcpp::Client<arena_auditory_msgs::srv::RemoveMicrophone>::SharedPtr remove_microphone_client;
-    rclcpp::Client<arena_auditory_msgs::srv::RemoveSound>::SharedPtr remove_sound_client;
+    rclcpp::Client<task_generator_msgs::srv::RemoveSound>::SharedPtr remove_sound_client;
 
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr microphone_listeners_sub;
     rclcpp::Subscription<task_generator_msgs::msg::SemanticSnapshot>::SharedPtr semantic_snapshot_sub;

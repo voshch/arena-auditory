@@ -5,9 +5,10 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from arena_rclpy_mixins.param_groups import configure
 
 from arena_auditory.materials import AcousticMaterialCatalog
-from arena_auditory.params import RirGroup, configure
+from arena_auditory.params import RirGroup
 from arena_auditory.propagation.pyroom_adapter import PyroomacousticsAdapter, RirConfig, RirUnavailable, direct_arrival
 from arena_auditory.rooms import AcousticBoundarySpec, AcousticRoomSpec
 

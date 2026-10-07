@@ -18,7 +18,8 @@ from arena_auditory.render.core import (
     render_block,
     render_inputs_to_json,
 )
-from arena_auditory.shared import active_rms
+from arena_robots.audio import active_rms
+from arena_simulation_setup.tree.assets.sound_catalog import SoundLibrary
 from scipy.io import wavfile
 
 CHANNELS = 4
@@ -467,6 +468,7 @@ def _library_block(index: int) -> RenderInputs:
     )
 
 
+@pytest.mark.usefixtures("default_sounds")
 def test_render_episode_writes_the_replayed_trace_beside_the_recording(tmp_path: Path) -> None:
     path = tmp_path / "episode.mcap"
     topic = "/arena/env_0/task_generator_node/jackal/audio/diagnostics/render_inputs"
@@ -493,3 +495,16 @@ def test_render_episode_writes_the_replayed_trace_beside_the_recording(tmp_path:
     verify = offline_render.render_episode(offline_render.EpisodeJob(path=path, mode="verify", rir_crossfade_s=0.1, sample_rate=SAMPLE_RATE, block_size=BLOCK_SIZE))
     assert not verify.ok
     assert "nothing to verify against" in verify.error
+
+
+def test_legacy_sample_key_resolves_to_the_default_asset_owning_the_variant(default_sounds: SoundLibrary) -> None:
+    default_sounds.use_world(None)
+    footstep = default_sounds.default_asset("footstep")
+    assert offline_render.legacy_owner(default_sounds, footstep.variants[0].id) == "footstep"
+
+
+def test_legacy_sample_key_without_an_owner_is_rejected() -> None:
+    library = SoundLibrary.default()
+    library.use_world(None)
+    with pytest.raises(KeyError, match="needs exactly one sound asset with that variant, found \\[\\]"):
+        offline_render.legacy_owner(library, "no_such_variant_01")

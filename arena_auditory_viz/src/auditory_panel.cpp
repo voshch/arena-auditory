@@ -221,7 +221,7 @@ namespace arena_auditory_viz
             node->create_client<arena_auditory_msgs::srv::RemoveMicrophone>(
                 task_generator_node + "/runtime/remove_microphone");
         remove_sound_client =
-            node->create_client<arena_auditory_msgs::srv::RemoveSound>(
+            node->create_client<task_generator_msgs::srv::RemoveSound>(
                 task_generator_node + "/runtime/remove_sound");
         {
             rclcpp::QoS qos(rclcpp::KeepLast(1));
@@ -1159,11 +1159,11 @@ namespace arena_auditory_viz
         const std::string entity =
             items.front()->data(0, Qt::UserRole).toString().toStdString();
         auto request = std::make_shared<
-            arena_auditory_msgs::srv::RemoveSound::Request>();
+            task_generator_msgs::srv::RemoveSound::Request>();
         request->entity = entity;
         remove_sound_client->async_send_request(
             request,
-            [this, entity]( rclcpp::Client<arena_auditory_msgs::srv::RemoveSound>::SharedFuture future)
+            [this, entity]( rclcpp::Client<task_generator_msgs::srv::RemoveSound>::SharedFuture future)
             {
                 try
                 {

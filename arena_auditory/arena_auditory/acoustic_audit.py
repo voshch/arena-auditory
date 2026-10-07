@@ -10,12 +10,13 @@ import attrs
 import numpy as np
 import yaml
 from ament_index_python.packages import get_package_share_directory
+from arena_rclpy_mixins.param_groups import configure
 from arena_simulation_setup.tree.World import MultiLevelWorldView, WorldIdentifier
 from PIL import Image
 from shapely.geometry import Point, Polygon
 
 from arena_auditory.materials import default_catalog
-from arena_auditory.params import PortalGroup, RirGroup, VizGroup, WorldGroup, configure
+from arena_auditory.params import PortalGroup, RirGroup, VizGroup, WorldGroup
 from arena_auditory.propagation.plot import AcousticPlotDashboard, AcousticPlotSnapshot
 from arena_auditory.propagation.pyroom_adapter import PyroomacousticsAdapter, RirConfig
 from arena_auditory.rooms import AcousticBoundarySpec, AcousticRoomSpec, AcousticRoomSpecBuilder, AcousticWorldGraph

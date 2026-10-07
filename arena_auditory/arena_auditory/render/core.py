@@ -9,9 +9,9 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, cast
 
 import numpy as np
+from arena_simulation_setup.tree.assets.sound_catalog import AgentKind, Stem
 from scipy.signal import fftconvolve
 
-from arena_auditory.assets import Stem
 from arena_auditory.render.dsp import (
     PartitionedConvolver,
     calibrate_mems,
@@ -20,7 +20,7 @@ from arena_auditory.render.dsp import (
     resample_impulse,
     streaming_fractional_delays,
 )
-from arena_auditory.shared import AgentKind, SourceSpec
+from arena_auditory.shared import SourceSpec
 from arena_auditory.sources import StreamProgram, stream_model
 from arena_auditory.sources.drivetrain.program import (
     BROADBAND_GAIN_DB,

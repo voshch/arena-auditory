@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from arena_robots.audio import active_rms, dbfs_from_rms, rms, spl_to_dbfs
+from arena_simulation_setup.tree.assets.sound_catalog import AgentKind
 
 from arena_auditory.params import MotorGroup
 from arena_auditory.render.dsp import calibrate_mems, mems_gain
-from arena_auditory.shared import AgentKind, SourceSpec, active_rms, dbfs_from_rms, rms, spl_to_dbfs
+from arena_auditory.shared import SourceSpec
 from arena_auditory.sources import stream_model, tuning_of
 from arena_auditory.sources.drivetrain.program import (
     LEFT_VELOCITY,

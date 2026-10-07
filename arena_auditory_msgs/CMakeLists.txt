@@ -11,8 +11,6 @@ ament_auto_find_build_dependencies()
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   msg/AcousticPath.msg
-  msg/AudioFrame.msg
-  msg/AuditoryDetection.msg
   msg/ContinuousAudioSourceState.msg
   msg/ContinuousHeardSoundState.msg
   msg/HeardSoundEvent.msg
@@ -22,9 +20,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   msg/SoundReception.msg
   msg/SoundSource.msg
   srv/RemoveMicrophone.srv
-  srv/RemoveSound.srv
   srv/SpawnMicrophone.srv
-  srv/SpawnSound.srv
   DEPENDENCIES std_msgs geometry_msgs builtin_interfaces
 )
 

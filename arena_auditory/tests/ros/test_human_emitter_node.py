@@ -4,7 +4,6 @@ import asyncio
 import math
 import time
 import uuid
-from pathlib import Path
 
 import pytest
 
@@ -59,10 +58,10 @@ def _spin_until(rclpy, nodes, predicate, timeout_sec: float = 5.0) -> None:
 
 
 def _wav_seconds(asset: str, name: str) -> float:
-    from ament_index_python.packages import get_package_share_directory
+    from arena_simulation_setup.tree.assets.Sound import SoundIdentifier
     from scipy.io import wavfile
 
-    rate, data = wavfile.read(Path(get_package_share_directory("arena_auditory")) / "sounds" / "Common" / "Sound" / asset / name)
+    rate, data = wavfile.read(SoundIdentifier.parse(asset).resolve_sync().path / name)
     return data.shape[0] / rate
 
 
@@ -94,7 +93,7 @@ def _pedestrians(*peds):
 
 
 @pytest.fixture
-def human_emitter(rclpy_context, loop):
+def human_emitter(rclpy_context, default_sounds, loop):
     import rclpy
     from arena_auditory_msgs.msg import SoundEvent
     from arena_rclpy_mixins.qos import reliable
@@ -138,13 +137,14 @@ def test_pedestrian_state_takes_yaw_from_orientation_and_speed_from_twist() -> N
 
 def test_footstep_on_a_ceramic_tile_zone_is_tagged_ceramic_tile(human_emitter) -> None:
     import rclpy
+    from arena_rclpy_mixins.param_groups import configure
     from arena_rclpy_mixins.qos import latched
+    from arena_simulation_setup.tree.assets.sound_catalog import SoundLibrary
     from nav_msgs.msg import OccupancyGrid
     from std_msgs.msg import String
 
-    from arena_auditory.assets import SoundLibrary
     from arena_auditory.materials import default_catalog
-    from arena_auditory.params import PortalGroup, WorldGroup, configure
+    from arena_auditory.params import PortalGroup, WorldGroup
     from arena_auditory.world import AcousticWorld, WorldConfig
 
     producer, consumer, namespace, emit = human_emitter
