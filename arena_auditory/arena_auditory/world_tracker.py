@@ -153,7 +153,10 @@ class WorldTracker:
             return
         if not loaded.scene.zones:
             self._node.get_logger().warning(f"world {loaded.name!r} has no authored acoustic zones, using map-based distance and occlusion propagation")
-        SoundLibrary.default().use_world(loaded.path)
+        try:
+            SoundLibrary.default().use_world(loaded.path)
+        except WORLD_RESOLVE_ERRORS as exc:
+            self._node.get_logger().error(f"world-local sounds of {loaded.name!r} unavailable: {exc!r}")
         self._loaded = loaded
         self._realize()
 
