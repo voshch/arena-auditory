@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from concurrent.futures import ThreadPoolExecutor
 
 import attrs
 from arena_auditory_msgs.msg import HeardSoundEvent
@@ -21,6 +22,7 @@ from visualization_msgs.msg import Marker
 from arena_auditory.constants import BUS_FRONTEND, HEARD_SOUND_EVENTS, STATE_ROBOTS, detections, heard_sound, heard_sound_marker
 from arena_auditory.params import Configuration
 from arena_auditory.shared import ListenerId, ListenerKind
+from arena_auditory.world_tracker import follow_world_sounds
 
 RELEASE_PERIOD_S = 0.01
 
@@ -45,13 +47,19 @@ class BusNode(ArenaMixinNode):
         super().__init__("robot_hearing_node")
         self.conf = Configuration(self)
         self._bus = self.conf.Bus
-        self._kinds = SoundLibrary.default().kinds()
+        self._library = SoundLibrary.default()
+        self._loader = ThreadPoolExecutor(max_workers=1, thread_name_prefix="bus_world")
+        follow_world_sounds(self, self._library, self._loader)
         self._robots: dict[str, _RobotOutputs] = {}
         self._pending: list[_Pending] = []
         self.create_subscription(RobotFleet, STATE_ROBOTS, self._cb_fleet, qos.latched())
         self.create_subscription(HeardSoundEvent, HEARD_SOUND_EVENTS, self._cb_heard, qos.reliable(50))
         self.create_timer(RELEASE_PERIOD_S, self._release)
         self.get_logger().info(f"robot hearing node listening on {self.resolve_topic_name(HEARD_SOUND_EVENTS)!r}, waiting for the robot fleet")
+
+    def destroy_node(self) -> bool:
+        self._loader.shutdown(wait=False, cancel_futures=True)
+        return super().destroy_node()
 
     def _cb_fleet(self, msg: RobotFleet) -> None:
         for binding in robot_bindings(msg):
@@ -115,7 +123,7 @@ class BusNode(ArenaMixinNode):
         )
 
     def _publish_marker(self, robot: str, outputs: _RobotOutputs, msg: HeardSoundEvent) -> None:
-        kind = self._kinds.get(msg.source.kind)
+        kind = self._library.kinds().get(msg.source.kind)
         if kind is None or not kind.marker or not outputs.markers.wanted:
             return
         bus = self._bus
