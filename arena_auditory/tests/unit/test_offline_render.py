@@ -484,9 +484,7 @@ def test_render_episode_writes_the_replayed_trace_beside_the_recording(tmp_path:
     assert report.output == tmp_path / "episode.render.wav"
     assert report.first_block == 4
     resolve, _ = offline_render.asset_resolver(SAMPLE_RATE)
-    expected = offline_render.render_results(
-        list(offline_render.replay((_library_block(index) for index in (4, 5, 6)), RenderParams(channels=2, block_size=BLOCK_SIZE, sample_rate=SAMPLE_RATE, resolve=resolve)))
-    )
+    expected = offline_render.render_results(list(offline_render.replay((_library_block(index) for index in (4, 5, 6)), RenderParams(channels=2, block_size=BLOCK_SIZE, sample_rate=SAMPLE_RATE, resolve=resolve))))
     rate, written = wavfile.read(report.output)
     assert rate == SAMPLE_RATE
     assert np.max(np.abs(expected)) > 0.0

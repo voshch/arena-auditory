@@ -146,10 +146,7 @@ class MultiPortalRirCoupler:
             self._route_cache_hits += 1
             result = cached_route.result
             path_length = cached_route.path_length_m + (
-                _segment_length(source_position_m, result.source_portal_position)
-                + _segment_length(result.listener_portal_position, listener_position_m)
-                - _segment_length(cached_route.source, result.source_portal_position)
-                - _segment_length(result.listener_portal_position, cached_route.listener)
+                _segment_length(source_position_m, result.source_portal_position) + _segment_length(result.listener_portal_position, listener_position_m) - _segment_length(cached_route.source, result.source_portal_position) - _segment_length(result.listener_portal_position, cached_route.listener)
             )
             return attrs.evolve(
                 result,

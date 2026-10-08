@@ -24,10 +24,7 @@ def _portal_config(**given: object) -> PortalConfig:
 
 def _room(name: str, x_min: float, x_max: float, y_max: float = 1.0, material_id: str = "wall") -> AcousticRoomSpec:
     corners = ((x_min, 0.0), (x_max, 0.0), (x_max, y_max), (x_min, y_max))
-    boundary = tuple(
-        AcousticBoundarySpec(start=start, end=corners[(index + 1) % len(corners)], material_id=material_id, kind="wall")
-        for index, start in enumerate(corners)
-    )
+    boundary = tuple(AcousticBoundarySpec(start=start, end=corners[(index + 1) % len(corners)], material_id=material_id, kind="wall") for index, start in enumerate(corners))
     return AcousticRoomSpec(zone_name=name, boundary=boundary, floor_material_id="floor", ceiling_material_id="ceiling", ceiling_height_m=3.0)
 
 

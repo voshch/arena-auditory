@@ -141,10 +141,7 @@ class PyroomBackend:
         summary = f"room RIR cache {adapter.cache_entries} entries, {adapter.cache_hits} hits, {adapter.cache_misses} misses"
         if coupler is None:
             return summary
-        return (
-            f"{summary}, portal segments {coupler.cache_entries} entries, {coupler.cache_hits} hits, {coupler.cache_misses} misses,"
-            f" portal routes {coupler.route_cache_entries} entries, {coupler.route_cache_hits} hits, {coupler.route_cache_misses} misses"
-        )
+        return f"{summary}, portal segments {coupler.cache_entries} entries, {coupler.cache_hits} hits, {coupler.cache_misses} misses, portal routes {coupler.route_cache_entries} entries, {coupler.route_cache_hits} hits, {coupler.route_cache_misses} misses"
 
     def _sync(self, world: AcousticWorld) -> MultiPortalRirCoupler:
         if self._coupler is None or world.signature != self._world_signature:

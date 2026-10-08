@@ -150,9 +150,7 @@ class _Scene:
         self._map_pub.publish(_free_map())
         self._fleet_pub.publish(_robot_fleet(self.robot, f"{self.namespace}/{self.robot}", f"{self.robot}_{self.suffix}"))
         self.spin_until(
-            lambda: self.propagation._tracker.occupancy is not None
-            and bool(self.propagation._robots)
-            and self.propagation._tf_buffer.can_transform("map", self.base_frame, rclpy.time.Time()),
+            lambda: self.propagation._tracker.occupancy is not None and bool(self.propagation._robots) and self.propagation._tf_buffer.can_transform("map", self.base_frame, rclpy.time.Time()),
         )
 
     def spin_until(self, predicate, timeout_sec: float = 10.0) -> None:
@@ -189,11 +187,7 @@ def test_auditory_round_trip_greeting_reaches_robot_marker(rclpy_context, defaul
         peds_pub = driver.create_publisher(Pedestrians, f"{ns}/arena_peds", 10)
         scene.start()
         scene.spin_until(
-            lambda: "robot1" in bus._robots
-            and bus._robots["robot1"].heard.get_subscription_count() > 0
-            and bus._robots["robot1"].markers.wanted
-            and emitter._sound_publisher.get_subscription_count() > 0
-            and peds_pub.get_subscription_count() > 0,
+            lambda: "robot1" in bus._robots and bus._robots["robot1"].heard.get_subscription_count() > 0 and bus._robots["robot1"].markers.wanted and emitter._sound_publisher.get_subscription_count() > 0 and peds_pub.get_subscription_count() > 0,
         )
 
         pedestrians = Pedestrians()
@@ -264,11 +258,7 @@ def test_four_mic_array_renders_and_robot_hearing_hears_the_centroid(rclpy_conte
         sound_pub = driver.create_publisher(SoundEvent, f"{ns}/sound_events", reliable(50))
         scene.start()
         scene.spin_until(
-            lambda: "jackal" in renderer._targets
-            and "jackal" in bus._robots
-            and bus._robots["jackal"].heard.get_subscription_count() > 0
-            and sound_pub.get_subscription_count() > 0
-            and renderer._targets["jackal"].publishers[ArrayStream.ENERGY].get_subscription_count() > 0,
+            lambda: "jackal" in renderer._targets and "jackal" in bus._robots and bus._robots["jackal"].heard.get_subscription_count() > 0 and sound_pub.get_subscription_count() > 0 and renderer._targets["jackal"].publishers[ArrayStream.ENERGY].get_subscription_count() > 0,
         )
 
         event = SoundEvent()
@@ -290,9 +280,7 @@ def test_four_mic_array_renders_and_robot_hearing_hears_the_centroid(rclpy_conte
         sound_pub.publish(event)
         mic_ids = {f"array:jackal:{name}" for name in ("front_left", "front_right", "rear_left", "rear_right")}
         scene.spin_until(
-            lambda: bool(robot_events)
-            and mic_ids.issubset({message.reception.listener_id for message in propagated})
-            and any(message.data and max(message.data) > 1e-3 for message in levels),
+            lambda: bool(robot_events) and mic_ids.issubset({message.reception.listener_id for message in propagated}) and any(message.data and max(message.data) > 1e-3 for message in levels),
             timeout_sec=15.0,
         )
 

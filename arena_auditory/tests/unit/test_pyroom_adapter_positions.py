@@ -17,10 +17,7 @@ CATALOG_PATH = Path(__file__).resolve().parents[2] / "config" / "acoustic_materi
 
 def _room(size: float = 2.0) -> AcousticRoomSpec:
     corners = ((0.0, 0.0), (size, 0.0), (size, size), (0.0, size))
-    boundary = tuple(
-        AcousticBoundarySpec(start=start, end=end, material_id="Acoustic_Default_Wall", kind="wall")
-        for start, end in zip(corners, (*corners[1:], corners[0]), strict=True)
-    )
+    boundary = tuple(AcousticBoundarySpec(start=start, end=end, material_id="Acoustic_Default_Wall", kind="wall") for start, end in zip(corners, (*corners[1:], corners[0]), strict=True))
     return AcousticRoomSpec(
         zone_name="room",
         boundary=boundary,

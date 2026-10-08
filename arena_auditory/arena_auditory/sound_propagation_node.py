@@ -423,9 +423,7 @@ class SoundPropagationNode(ArenaMixinNode):
             detail = f", fallback={reception.fallback_reason!r}" if reception.used_fallback else ""
             portal = f", portal={reception.portal_ids[0]!r}" if reception.portal_ids else ""
             message = (
-                f"actual propagation backend={reception.backend!r} for {reception.source_zone!r}->{reception.listener_zone!r}{portal}{detail}, "
-                f"source=({emission.position[0]:.2f},{emission.position[1]:.2f}) name={emission.agent_name!r}, "
-                f"listener={listener.id!r}@({listener.position[0]:.2f},{listener.position[1]:.2f})"
+                f"actual propagation backend={reception.backend!r} for {reception.source_zone!r}->{reception.listener_zone!r}{portal}{detail}, source=({emission.position[0]:.2f},{emission.position[1]:.2f}) name={emission.agent_name!r}, listener={listener.id!r}@({listener.position[0]:.2f},{listener.position[1]:.2f})"
             )
             if reception.used_fallback:
                 self.get_logger().warning(message)
@@ -678,11 +676,7 @@ class SoundPropagationNode(ArenaMixinNode):
             stored = (attached, attached_frame)
         transformed = self._in_acoustic_frame(clicked, source_frame, "spawned microphone")
         world = self._tracker.world
-        zone = (
-            next((candidate for candidate in world.scene.zones if candidate.polygon.buffer(MICROPHONE_PLACEMENT_TOLERANCE_M).covers(shapely.Point(transformed[0], transformed[1]))), None)
-            if world is not None and transformed is not None
-            else None
-        )
+        zone = next((candidate for candidate in world.scene.zones if candidate.polygon.buffer(MICROPHONE_PLACEMENT_TOLERANCE_M).covers(shapely.Point(transformed[0], transformed[1]))), None) if world is not None and transformed is not None else None
         room = world.room(zone.name) if world is not None and zone is not None else None
         check = transformed or stored[0]
         if check[2] < -MICROPHONE_PLACEMENT_TOLERANCE_M:

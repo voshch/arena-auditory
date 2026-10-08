@@ -444,10 +444,7 @@ class AcousticWorld:
                 zone_polygons=tuple((name, translate(polygon, xoff=dx, yoff=dy)) for name, polygon in self.graph.zone_polygons),
                 unpaired_doors=tuple(_translate_unpaired_door(door, dx, dy) for door in self.graph.unpaired_doors),
             ),
-            microphones=tuple(
-                attrs.evolve(microphone, position=(microphone.position[0] + dx, microphone.position[1] + dy, microphone.position[2])) if microphone.frame == "map" else microphone
-                for microphone in self.microphones
-            ),
+            microphones=tuple(attrs.evolve(microphone, position=(microphone.position[0] + dx, microphone.position[1] + dy, microphone.position[2])) if microphone.frame == "map" else microphone for microphone in self.microphones),
             offset=offset,
         )
 

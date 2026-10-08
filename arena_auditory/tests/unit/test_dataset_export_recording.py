@@ -53,9 +53,7 @@ def test_uint64_seed_can_be_written_losslessly(tmp_path: Path) -> None:
 
     write_parquet(path, [{"deterministic_seed": seed, "active": True}])
 
-    assert pq.read_table(path).to_pylist() == [
-        {"deterministic_seed": seed, "active": True}
-    ]
+    assert pq.read_table(path).to_pylist() == [{"deterministic_seed": seed, "active": True}]
 
 
 def test_assemble_audio_uses_sample_index_and_reports_gap():
@@ -168,12 +166,18 @@ def test_robot_odometry_is_transformed_into_map_frame():
 def test_rendered_activity_intervals_merge_channels_and_classify_frames():
     records = [
         {
-            "event_id": "step-1", "source_id": "step-1",
-            "source_agent_id": 7, "source_agent_name": "agent_7",
-            "source_type": "pedestrian", "sound_type": "footstep",
-            "asset_id": "footstep", "channel_name": channel,
-            "continuous": False, "active": True,
-            "start_time_ns": start, "end_time_ns": end,
+            "event_id": "step-1",
+            "source_id": "step-1",
+            "source_agent_id": 7,
+            "source_agent_name": "agent_7",
+            "source_type": "pedestrian",
+            "sound_type": "footstep",
+            "asset_id": "footstep",
+            "channel_name": channel,
+            "continuous": False,
+            "active": True,
+            "start_time_ns": start,
+            "end_time_ns": end,
         }
         for channel, start, end in (
             ("front_left", 1_002_000_000, 1_012_000_000),
@@ -183,11 +187,17 @@ def test_rendered_activity_intervals_merge_channels_and_classify_frames():
     records.extend(
         [
             {
-                "event_id": "motor", "source_id": "motor",
-                "source_agent_id": -1, "source_agent_name": "jackal",
-                "source_type": "robot", "sound_type": "motor", "asset_id": "",
-                "channel_name": "front_left", "continuous": True,
-                "active": active, "start_time_ns": timestamp,
+                "event_id": "motor",
+                "source_id": "motor",
+                "source_agent_id": -1,
+                "source_agent_name": "jackal",
+                "source_type": "robot",
+                "sound_type": "motor",
+                "asset_id": "",
+                "channel_name": "front_left",
+                "continuous": True,
+                "active": active,
+                "start_time_ns": timestamp,
                 "end_time_ns": timestamp,
             }
             for active, timestamp in ((True, 1_005_000_000), (False, 1_015_000_000))
@@ -212,8 +222,15 @@ def test_rendered_activity_intervals_merge_channels_and_classify_frames():
     summary = {"sample_rate": 1000, "first_timestamp_ns": 1_000_000_000, "first_sample_index": 100}
     robot = [{"timestamp_ns": 1_000_000_000, "x": 0.0, "y": 0.0, "z": 0.0, "yaw": 0.0, "vx": 0.0, "vy": 0.0, "vz": 0.0, "yaw_rate": 0.0}]
     labels = build_labels(
-        audio, summary, audio, summary, robot, {},
-        frame_ms=10, max_pose_gap_ms=20, emit_robot_only=True,
+        audio,
+        summary,
+        audio,
+        summary,
+        robot,
+        {},
+        frame_ms=10,
+        max_pose_gap_ms=20,
+        emit_robot_only=True,
         activity_intervals=intervals,
     )
     assert labels[0]["activity_class"] == "single_pedestrian_plus_motor"

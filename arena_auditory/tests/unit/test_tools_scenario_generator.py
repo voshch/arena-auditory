@@ -54,12 +54,7 @@ def world_dir(tmp_path: Path) -> Path:
 
 def _matrix(world_dir: Path) -> dict[tuple[str, int, str], dict[str, Any]]:
     scenarios = {scenario.name: scenario.data for scenario in scenario_generator.plan_world(world_dir)}
-    return {
-        (state, count, direction): scenarios[scenario_generator.scenario_name(world_dir.name, state, count, direction)]
-        for state in scenario_generator.ROBOT_STATES
-        for count in scenario_generator.PEDESTRIAN_COUNTS
-        for direction in scenario_generator.END_DIRECTIONS
-    }
+    return {(state, count, direction): scenarios[scenario_generator.scenario_name(world_dir.name, state, count, direction)] for state in scenario_generator.ROBOT_STATES for count in scenario_generator.PEDESTRIAN_COUNTS for direction in scenario_generator.END_DIRECTIONS}
 
 
 def test_direction_changes_pedestrians_without_moving_robot(world_dir: Path) -> None:

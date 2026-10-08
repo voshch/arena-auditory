@@ -23,10 +23,7 @@ LISTENERS = ((1.6, 1.2, 0.4), (1.6, 1.4, 0.4), (4.5, 1.6, 0.4), (1.5, 4.5, 2.2),
 def _l_room() -> AcousticRoomSpec:
     corners = ((0.0, 0.0), (5.0, 0.0), (5.0, 2.0), (2.0, 2.0), (2.0, 5.0), (0.0, 5.0))
     materials = ("Acoustic_Default_Wall", "Plaster_Wall", "Acoustic_Default_Wall", "Concrete_Smooth", "Acoustic_Default_Wall", "Oak_Planks")
-    boundary = tuple(
-        AcousticBoundarySpec(start=start, end=end, material_id=material, kind="wall")
-        for start, end, material in zip(corners, (*corners[1:], corners[0]), materials, strict=True)
-    )
+    boundary = tuple(AcousticBoundarySpec(start=start, end=end, material_id=material, kind="wall") for start, end, material in zip(corners, (*corners[1:], corners[0]), materials, strict=True))
     return AcousticRoomSpec(zone_name="l_room", boundary=boundary, floor_material_id="Acoustic_Default_Floor", ceiling_material_id="Acoustic_Default_Ceiling", ceiling_height_m=3.0)
 
 
