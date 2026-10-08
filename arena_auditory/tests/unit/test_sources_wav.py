@@ -15,6 +15,7 @@ from arena_auditory.render.dsp import PartitionedConvolver
 from arena_auditory.shared import SourceSpec
 from arena_auditory.sources import SOURCE_MODELS, BufferProgram, ProgramContext, streamed
 
+
 @pytest.fixture
 def library(tmp_path: Path) -> Iterator[SoundLibrary]:
     directory = tmp_path / "world" / "assets" / "Common" / "Sound" / "tmp_steps"

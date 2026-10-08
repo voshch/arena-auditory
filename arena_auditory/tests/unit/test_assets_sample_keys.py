@@ -11,6 +11,7 @@ from scipy.io import wavfile
 
 from arena_auditory.assets import SampleDecoder
 
+
 @pytest.fixture
 def library(tmp_path: Path) -> Iterator[SoundLibrary]:
     directory = tmp_path / "world" / "assets" / "Common" / "Sound" / "tmp_chirp"

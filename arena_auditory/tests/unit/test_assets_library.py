@@ -12,6 +12,7 @@ from scipy.io import wavfile
 
 from arena_auditory.assets import SampleDecoder, decode_wav
 
+
 def _write_asset(world: Path, name: str, manifest: Mapping[str, object], wavs: Mapping[str, tuple[int, np.ndarray]]) -> Path:
     directory = world / "assets" / "Common" / "Sound" / name
     directory.mkdir(parents=True)
