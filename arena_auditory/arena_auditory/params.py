@@ -7,7 +7,8 @@ import functools
 import math
 import typing
 
-from arena_rclpy_mixins.param_groups import Param, ParamGroup, PerRole, count, finite, non_negative, positive, positive_count, within
+from arena_rclpy_mixins.param_groups import Param, ParamGroup, PerRole, count, finite, floats, non_negative, positive, positive_count, within
+from arena_robots.audio import Vec3
 from arena_robots.fleet import DEFAULT_ODOM_TOPIC_TEMPLATE
 
 if typing.TYPE_CHECKING:
@@ -52,6 +53,13 @@ def _frame_template(value: object) -> str:
     except (KeyError, IndexError, ValueError) as exc:
         raise ValueError(f"frame template {value!r} may only use {{prefix}} and {{base_frame}}") from exc
     return template
+
+
+def _sides(value: object) -> tuple[Vec3, Vec3]:
+    flat = floats(value)
+    if len(flat) != 6:
+        raise ValueError(f"{value!r} is not two x y z points, left then right")
+    return (flat[0], flat[1], flat[2]), (flat[3], flat[4], flat[5])
 
 
 class EnvGroup(ParamGroup):
@@ -132,6 +140,8 @@ class MotorGroup(ParamGroup):
     BROADBAND_GAIN_DB = Param[float]("motor.broadband_gain_db", -12.0, parse=finite)
     SPEED_EXPONENT = Param[float]("motor.speed_exponent", 1.0, parse=finite)
     VELOCITY_SMOOTHING_S = Param[float]("motor.velocity_smoothing_s", 0.015, parse=non_negative)
+    STRUCTURAL_SHARE = Param[float]("motor.structural_share", 0.2, parse=within(0.0, 1.0), description="Share of a robot's own motor power at each of its array microphones that arrives structure-borne, incoherent across the microphones. 0 leaves the airborne field from the drive points alone.")
+    DRIVE_POINTS_M = Param[tuple[Vec3, Vec3]]("motor.drive_points_m", [0.0, 0.1878, 0.0345, 0.0, -0.1878, 0.0345], parse=_sides, description="Points the left and right drivetrain of a robot radiate from to its own array, x y z left then right in the array mount frame. The default is the Jackal's mid-wheel points.")
 
 
 class OutputGroup(ParamGroup):

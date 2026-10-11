@@ -199,6 +199,53 @@ def test_drivetrain_seed_change_rebinds_the_source_on_the_prewarmed_field(array_
     assert cache_bytes() == held
 
 
+def _own_drivetrain_state(mic: str) -> object:
+    from arena_auditory_msgs.msg import ContinuousHeardSoundState
+
+    return ContinuousHeardSoundState(
+        source=_source(
+            id=f"robot:{ROBOT}:motor",
+            kind="motor",
+            asset_id="motor",
+            variant_id="jackal_drivetrain",
+            model="drivetrain",
+            agent_kind="robot",
+            agent_name=ROBOT,
+            seed=5,
+            state_names=["left_velocity_mps", "right_velocity_mps"],
+            state_values=[0.5, 0.5],
+        ),
+        reception=_reception(f"array:{ROBOT}:{mic}"),
+    )
+
+
+@pytest.mark.usefixtures("default_sounds")
+def test_own_drivetrain_reaches_each_microphone_from_every_drive_point(array_harness: Harness) -> None:
+    from arena_auditory.params import MotorGroup
+    from arena_auditory.propagation.self_path import drive_distances
+    from arena_robots.audio import SPEED_OF_SOUND_MPS
+
+    node = array_harness.node
+    for mic in node.spec.mics:
+        node._on_continuous(_own_drivetrain_state(mic.name))
+    node._on_continuous(_drivetrain_state(5))
+    target = node._targets[ROBOT]
+    own = target.streams[f"robot:{ROBOT}:motor"]
+    other = target.streams["robot:other"]
+    points = MotorGroup.defaults()[MotorGroup.DRIVE_POINTS_M.field]
+    distances = np.asarray([drive_distances(points, mic.position_m) for mic in node.spec.mics])
+    gains = np.asarray(own.gains).reshape(distances.shape)
+
+    assert own.own_robot
+    assert own.paths == len(points)
+    np.testing.assert_allclose(own.delay_samples, (distances / SPEED_OF_SOUND_MPS * node.sample_rate).reshape(-1))
+    np.testing.assert_allclose(gains * distances, gains[0, 0] * distances[0, 0])
+    assert own.delay_samples[0:2] != own.delay_samples[2:4]
+    assert not other.own_robot
+    assert other.paths == 1
+    assert len(other.gains) == len(other.delay_samples) == node.spec.channels
+
+
 def test_output_switches_gate_their_stems_in_the_workstation_mix(array_harness: Harness) -> None:
     from arena_auditory.render.core import RenderResult
     from rclpy.parameter import Parameter

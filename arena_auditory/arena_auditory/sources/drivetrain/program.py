@@ -131,6 +131,19 @@ class DrivetrainProgram:
             self._velocity_smoothing_s = float(tuning[VELOCITY_SMOOTHING_S])
 
     def render(self, frames: int) -> np.ndarray:
+        left, right, gain, volume_gain = self._render(frames)
+        dry = np.asarray(left + right, dtype=np.float32) * gain
+        dry *= volume_gain
+        return dry
+
+    def render_sides(self, frames: int) -> np.ndarray:
+        """Left and right drivetrain outputs, shape (2, frames)."""
+        left, right, gain, volume_gain = self._render(frames)
+        sides = np.asarray(np.stack((left, right)), dtype=np.float32) * gain
+        sides *= volume_gain
+        return sides
+
+    def _render(self, frames: int) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         if int(frames) != self.block_size:
             raise ValueError(f"drivetrain source configured for {self.block_size} frames, audio callback requested {frames}")
         with self._lock:
@@ -159,19 +172,17 @@ class DrivetrainProgram:
             "broadband_gain_db": broadband_gain_db,
             "speed_exponent": speed_exponent,
         }
-        dry = self._left.render(left_speed, **render_options) + self._right.render(right_speed, **render_options)
+        left = self._left.render(left_speed, **render_options)
+        right = self._right.render(right_speed, **render_options)
 
         gain = np.linspace(self._current_gain, target_gain, frames, dtype=np.float32)
         self._current_gain = target_gain
-        dry = np.asarray(dry, dtype=np.float32) * gain
         volume_gain = np.linspace(self._current_volume_gain, target_volume_gain, frames, dtype=np.float32)
         self._current_volume_gain = target_volume_gain
-        dry *= volume_gain
-        mono = np.asarray(dry, dtype=np.float32)
         with self._lock:
             if not self._active:
                 self._inactive_frames += frames
-        return mono
+        return left, right, gain, volume_gain
 
     @property
     def finished(self) -> bool:

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
+import math
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass, field
 from typing import Any, cast
@@ -12,8 +14,10 @@ import numpy as np
 from arena_simulation_setup.tree.assets.sound_catalog import AgentKind, Stem
 from scipy.signal import fftconvolve
 
+from arena_auditory.params import MotorGroup
 from arena_auditory.render.dsp import (
     PartitionedConvolver,
+    PhaseDrift,
     calibrate_mems,
     fractional_delay,
     ramped_read,
@@ -39,6 +43,7 @@ from arena_auditory.sources.drivetrain.program import (
 TRACE_VERSION = 2
 V1_CHANNELS = 4
 IMPULSE_FLOOR_DB = -60.0
+STRUCTURAL_SHARE = MotorGroup.STRUCTURAL_SHARE.field
 
 _LOG = logging.getLogger(__name__)
 
@@ -107,7 +112,7 @@ class ContinuousInput:
 
 @dataclass(frozen=True)
 class StreamInput:
-    """One streamed source in full: the model's program inputs and its per-channel arrival."""
+    """One streamed source in full: the model's program inputs and its arrival over paths per channel, gains and delays channel-major."""
 
     source_id: str
     model: str
@@ -125,6 +130,8 @@ class StreamInput:
     asset_id: str
     rir_keys: tuple[str, ...] = ()
     stem: Stem = "motor"
+    paths: int = 1
+    own_robot: bool = False
 
 
 @dataclass(frozen=True)
@@ -267,8 +274,11 @@ class StreamVoice:
     asset_id: str
     stem: Stem = "motor"
     rir: dict[int, RirStage] = field(default_factory=dict)
-    history: np.ndarray | None = None
+    history: list[np.ndarray | None] = field(default_factory=lambda: [None])
     inactive_frames: int = 0
+    paths: int = 1
+    structural: PhaseDrift | None = None
+    structural_share: float = 0.0
 
 
 @dataclass
@@ -433,6 +443,8 @@ def _stream_input(entry: Mapping[str, Any]) -> StreamInput:
         asset_id=entry["asset_id"],
         rir_keys=tuple(str(key) for key in entry["rir_keys"]),
         stem=cast(Stem, entry["stem"]),
+        paths=int(entry.get("paths", 1)),
+        own_robot=bool(entry.get("own_robot", False)),
     )
 
 
@@ -520,12 +532,17 @@ def _stream_source(source: StreamInput) -> SourceSpec:
     )
 
 
+def _robot_seed(name: str) -> int:
+    """Seed of a robot's structure-borne layer, fixed by its name."""
+    return int.from_bytes(hashlib.blake2b(name.encode(), digest_size=8).digest(), "big")
+
+
 def _reconcile_streams(state: RenderState, inputs: RenderInputs, params: RenderParams) -> None:
     live: set[str] = set()
     for source in inputs.streams:
         live.add(source.source_id)
         voice = state.streams.get(source.source_id)
-        fresh = voice is None or voice.seed != source.seed or voice.model != source.model or voice.params != source.params
+        fresh = voice is None or voice.seed != source.seed or voice.model != source.model or voice.params != source.params or voice.paths != source.paths or (voice.structural is not None) != source.own_robot
         if voice is None or fresh:
             voice = StreamVoice(
                 program=stream_model(source.model).stream(
@@ -547,6 +564,9 @@ def _reconcile_streams(state: RenderState, inputs: RenderInputs, params: RenderP
                 kind=source.kind,
                 asset_id=source.asset_id,
                 stem=source.stem,
+                history=[None] * source.paths,
+                paths=source.paths,
+                structural=PhaseDrift(params.channels, params.block_size, params.sample_rate, _robot_seed(source.source_agent_name)) if source.own_robot else None,
             )
             state.streams[source.source_id] = voice
         for channel in range(params.channels):
@@ -555,7 +575,8 @@ def _reconcile_streams(state: RenderState, inputs: RenderInputs, params: RenderP
             if stage is not None:
                 voice.rir[channel] = stage
         voice.gains = np.asarray(source.gains, dtype=np.float32)
-        voice.delay_samples = np.asarray([_delay(float(delay), voice.rir.get(channel)) for channel, delay in enumerate(source.delay_samples)], dtype=np.float64)
+        voice.delay_samples = np.asarray([_delay(float(delay), voice.rir.get(index // source.paths)) for index, delay in enumerate(source.delay_samples)], dtype=np.float64)
+        voice.structural_share = float(source.tuning[STRUCTURAL_SHARE]) if source.own_robot else 0.0
         voice.active_channels = np.asarray(source.active_channels, dtype=np.bool_)
         if source.active:
             voice.inactive_frames = 0
@@ -623,17 +644,20 @@ def render_block(state: RenderState, inputs: RenderInputs, params: RenderParams)
         voice.delay_samples = voice.delay_target
     for source_id, voice in tuple(state.streams.items()):
         try:
-            mono = voice.program.render(params.block_size)
+            outputs = voice.program.render(params.block_size)[None, :] if voice.paths == 1 else voice.program.render_sides(params.block_size)
         except (ValueError, FloatingPointError, IndexError) as exc:
             params.log_error(f"{voice.model} stream render failed for {source_id!r}: {exc}")
             state.streams.pop(source_id, None)
             continue
-        delayed, voice.history = streaming_fractional_delays(
-            mono,
-            voice.delay_samples,
-            voice.history,
-        )
-        contribution = delayed * voice.gains[:, None]
+        delays = voice.delay_samples.reshape(params.channels, voice.paths)
+        gains = voice.gains.reshape(params.channels, voice.paths)
+        contribution = np.zeros((params.channels, params.block_size), dtype=np.float32)
+        for path, output in enumerate(outputs):
+            delayed, voice.history[path] = streaming_fractional_delays(output, delays[:, path], voice.history[path])
+            contribution += delayed * gains[:, path, None]
+        if voice.structural is not None:
+            share = voice.structural_share
+            contribution = math.sqrt(1.0 - share) * contribution + math.sqrt(share) * voice.structural.process(contribution)
         for channel, stage in voice.rir.items():
             contribution[channel] = stage.process(contribution[channel])
         stems[voice.stem] += contribution

@@ -30,12 +30,12 @@ from arena_rclpy_mixins.lazy import LazyPublisher
 from arena_rclpy_mixins.param_groups import Param, ParamGroup
 from arena_rclpy_mixins.qos import best_effort, latched, reliable
 from arena_rclpy_mixins.Time import Time
-from arena_robots.audio import ArrayStream, array_stream, dbfs_from_rms, gcc_phat, load_array_spec, rms
+from arena_robots.audio import SPEED_OF_SOUND_MPS, ArrayStream, array_stream, dbfs_from_rms, gcc_phat, load_array_spec, rms
 from arena_robots.fleet import RobotBinding, robot_bindings
 from arena_robots_msgs.msg import AudioFrame
 from arena_runtime.lockstep import register_channels
 from arena_runtime_msgs.msg import LockstepChannel
-from arena_simulation_setup.tree.assets.sound_catalog import SoundAsset, SoundLibrary, Variant
+from arena_simulation_setup.tree.assets.sound_catalog import AgentKind, SoundAsset, SoundLibrary, Variant
 from builtin_interfaces.msg import Time as TimeMsg
 from geometry_msgs.msg import Point
 from rclpy.clock import Clock, ClockType, JumpThreshold, TimeJump
@@ -50,6 +50,7 @@ from arena_auditory.assets import DecodedSample, SampleDecoder
 from arena_auditory.constants import CONTINUOUS_HEARD_SOUNDS, HEARD_SOUND_EVENTS, LISTENER_MONITOR, ROOM_IMPULSES, STATE_EPISODE, STATE_ROBOTS
 from arena_auditory.params import Configuration, MonitorMode, RenderRole
 from arena_auditory.propagation import IMPULSE_WINDOW
+from arena_auditory.propagation.self_path import drive_distances
 from arena_auditory.render.clock import RenderCursor
 from arena_auditory.render.core import (
     ClipInput,
@@ -185,6 +186,8 @@ class RendererNode(ArenaMixinNode):
             self.spec = load_array_spec(LISTENER_SPEC)
         self.sample_rate = self.spec.sample_rate_hz
         self.block_size = self.spec.block_size
+        drive_points = self._motor_conf.DRIVE_POINTS_M.value
+        self._drive_distances = tuple(drive_distances(drive_points, mic.position_m) for mic in self.spec.mics)
 
         self._library = SoundLibrary.default()
         self._decoder = SampleDecoder(self._library, self.sample_rate)
@@ -752,6 +755,8 @@ class RendererNode(ArenaMixinNode):
 
     def _on_stream(self, target: RenderTarget, source: SourceSpec, reception: SoundReception, channel: int, admitted: bool) -> None:
         channels = self.spec.channels
+        own = source.agent_kind is AgentKind.ROBOT and source.agent_name == target.robot
+        paths = len(self._drive_distances[0]) if own else 1
         current = target.streams.get(source.id)
         if current is not None and (current.seed != source.seed or current.model != source.model):
             target.streams.pop(source.id, None)
@@ -775,8 +780,8 @@ class RendererNode(ArenaMixinNode):
                 params=params,
                 state={},
                 tuning=self._model_tuning(model),
-                gains=(0.0,) * channels,
-                delay_samples=(0.0,) * channels,
+                gains=(0.0,) * channels * paths,
+                delay_samples=(0.0,) * channels * paths,
                 active_channels=(False,) * channels,
                 active=False,
                 source_agent_id=source.agent_id,
@@ -785,16 +790,20 @@ class RendererNode(ArenaMixinNode):
                 asset_id=source.asset_id,
                 rir_keys=("",) * channels,
                 stem=stem,
+                paths=paths,
+                own_robot=own,
             )
         target.stream_sources[source.id] = source
         room = self._room(reception.rir_key, current.rir_keys[channel])
         active = source.active and admitted and not room.silent
         active_channels = list(current.active_channels)
         active_channels[channel] = active
+        span = slice(channel * current.paths, (channel + 1) * current.paths)
+        path_gains, path_delays = self._paths(source, reception, current, channel)
         gains = list(current.gains)
-        gains[channel] = self._stream_gain(float(reception.received_level_db), current) if active else 0.0
+        gains[span] = path_gains if active else [0.0] * current.paths
         delay_samples = list(current.delay_samples)
-        delay_samples[channel] = self._delay_samples(reception)
+        delay_samples[span] = path_delays
         rir_keys = list(current.rir_keys)
         rir_keys[channel] = room.key
         target.streams[source.id] = replace(
@@ -806,6 +815,13 @@ class RendererNode(ArenaMixinNode):
             active=any(active_channels),
             rir_keys=tuple(rir_keys),
         )
+
+    def _paths(self, source: SourceSpec, reception: SoundReception, stream: StreamInput, channel: int) -> tuple[list[float], list[float]]:
+        """Gain and delay of each path of a stream to one channel, one per drivetrain side for the array's own robot."""
+        if not stream.own_robot:
+            return [self._stream_gain(float(reception.received_level_db), stream)], [self._delay_samples(reception)]
+        distances = self._drive_distances[channel]
+        return [self._stream_gain(source.level_at_1m_db - 20.0 * math.log10(distance), stream) for distance in distances], [distance / SPEED_OF_SOUND_MPS * self.sample_rate for distance in distances]
 
     def _stream_gain(self, received_spl_db: float, stream: StreamInput) -> float:
         reference = stream_model(stream.model).reference_rms(self.sample_rate, stream.params, stream.tuning)

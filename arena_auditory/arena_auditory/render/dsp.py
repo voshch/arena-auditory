@@ -10,6 +10,11 @@ from arena_robots.audio import rms_from_dbfs, spl_to_dbfs
 from numpy.typing import NDArray
 from scipy.signal import resample_poly
 
+J0_FIRST_ZERO = 2.404825557695773
+DRIFT_COMPONENTS = 3
+DRIFT_RATE_HZ = (0.25, 1.0)
+HILBERT_S = 0.064
+
 
 def mems_gain(received_spl_db: float, level_rms: float, *, sensitivity_dbfs_at_94_dbspl: float = -26.0) -> float:
     """Linear gain that brings a signal of active level level_rms to received_spl_db through a fixed MEMS sensitivity, 0 for a silent signal."""
@@ -159,6 +164,39 @@ class PartitionedConvolver:
         self._overlap = rendered[self.block_size :].copy()
         self._position = (self._position + 1) % len(self._history)
         return output.astype(np.float32)
+
+
+def hilbert_taps(sample_rate_hz: int) -> NDArray[np.float32]:
+    """Blackman-windowed FIR Hilbert transformer spanning HILBERT_S."""
+    half = max(round(HILBERT_S * sample_rate_hz / 2.0), 1)
+    offsets = np.arange(-half, half + 1)
+    taps = np.zeros(offsets.size)
+    odd = offsets % 2 != 0
+    taps[odd] = 2.0 / (np.pi * offsets[odd])
+    return (taps * np.blackman(offsets.size)).astype(np.float32)
+
+
+class PhaseDrift:
+    """Rotates each channel's analytic signal by its own slow seeded phase drift, a mean-zero phasor over time."""
+
+    def __init__(self, channels: int, block_size: int, sample_rate_hz: int, seed: int) -> None:
+        rng = np.random.default_rng(seed)
+        taps = hilbert_taps(sample_rate_hz)
+        self._lag = (taps.size - 1) // 2
+        self._quadrature = [PartitionedConvolver(taps, block_size) for _ in range(channels)]
+        self._history = np.zeros((channels, self._lag), dtype=np.float32)
+        self._rates = rng.uniform(*DRIFT_RATE_HZ, (channels, DRIFT_COMPONENTS, 1)) * (2.0 * math.pi / sample_rate_hz)
+        self._phases = rng.uniform(0.0, 2.0 * math.pi, (channels, DRIFT_COMPONENTS, 1))
+        self._frame = 0
+
+    def process(self, block: NDArray[np.float32]) -> NDArray[np.float32]:
+        frames = block.shape[1]
+        theta = J0_FIRST_ZERO * np.sin(self._rates * (self._frame + np.arange(frames)) + self._phases).sum(axis=1)
+        self._frame += frames
+        lagged = np.concatenate((self._history, block), axis=1)
+        self._history = lagged[:, frames:]
+        quadrature = np.stack([convolver.process(channel) for convolver, channel in zip(self._quadrature, block, strict=True)])
+        return (lagged[:, :frames] * np.cos(theta) - quadrature * np.sin(theta)).astype(np.float32)
 
 
 def resample_impulse(samples: NDArray[np.floating], from_rate_hz: int, to_rate_hz: int) -> NDArray[np.float32]:

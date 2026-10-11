@@ -130,6 +130,8 @@ and `auditory.static_sounds`. The arguments are:
 | `auditory.motor.enabled` | `true` | Robots emit drivetrain audio |
 | `auditory.motor.model` | `procedural` | `procedural` (Jackal drivetrain synthesis) or `wav` |
 | `auditory.motor.trim_db` | `0.0` | Live offset on the motor level. The motor asset `level_db` (45 dB at 1 m) is the level of every motor variant, the procedural drivetrain at the spec `v_ref` (1 m/s) |
+| `auditory.motor.structural_share` | `0.2` | Live share of a robot's own drivetrain power at each of its array microphones that arrives structure-borne, incoherent across the microphones. `0` leaves the airborne field from the drive points |
+| `auditory.motor.drive_points_m` | `[0.0, 0.1878, 0.0345, 0.0, -0.1878, 0.0345]` | Points the left and right drivetrain of a robot radiate from to its own array, x y z left then right in the array mount frame |
 | `auditory.listener.id` | empty | Microphone of the listener renderer |
 | `auditory.viewport.height_m` | `1.6` | Height of the viewport down-projection microphone |
 | `auditory.array.spec` | `stereo` | `mono`, `stereo`, `four_mic` or a yaml path. `four_mic` when `robot.hearing` is `srp` or `seld` |
@@ -233,9 +235,22 @@ no onboard AEC, AGC or beamforming). A custom array is a yaml with `name`,
 `sensitivity_dbfs_at_94_dbspl` and either `mics` (each `name`, `position_m`,
 `yaw_deg`, `side`, `group`) or `rectangular`.
 
-The robot's own sources (the motor) reach its array microphones through the
-fixed free-field direct path from the source to each microphone, so the
-ego-noise level stays constant in rooms, doorways and zone gaps alike.
+The robot's own sources (the motor) reach its array microphones through a
+fixed free-field direct path, so the ego-noise level stays constant in rooms,
+doorways and zone gaps alike. The robot's own streamed drivetrain radiates its
+left side from the left and its right side from the right point of
+`motor.drive_points_m` (the Jackal's mid-wheel points by default, in the array
+mount frame). Each microphone receives both sides with its own delays and 1/r
+gains from the motor's level at 1 m. The sides are two independent
+drivetrains, so this airborne field has rank two. A share
+`motor.structural_share` (0.2) of each microphone's motor power is the
+structure-borne layer: that microphone's airborne signal with its analytic
+phase rotated by a slow drift seeded by the robot name, fixed for a robot
+across episodes and incoherent across the microphones and with the airborne
+field. The magnitude-squared coherence of the motor between two microphones is
+the airborne one times (1 - share)^2, 0.64 times at the default. The motor WAV
+loops, other robots' motors and every other source take one direct path per
+microphone from their source point.
 
 The array renderer renders every robot of the fleet in one node, each with its
 own `<r>/audio/*` topics, render state and lockstep channel. The workstation
@@ -315,8 +330,9 @@ clipped samples, which tells whether `raw_array` itself was clamped.
 
 `diagnostics/render_inputs` carries one JSON object per block with the
 complete input state of the block (version 2: channels, stems, RIR keys and
-streamed sources with their model, params, state and tuning). Clips and
-continuous sources name their sample by its key `<asset id>#<variant id>`.
+streamed sources with their model, params, state, tuning, paths per channel
+and own-robot flag). Clips and continuous sources name their sample by its
+key `<asset id>#<variant id>`.
 `auditory_offline_render` reproduces the recorded audio from that trace alone,
 bit for bit. Traces recorded before keys carried the asset id hold the bare
 variant id, which the offline replay alone resolves by searching the local

@@ -4,12 +4,18 @@ from __future__ import annotations
 
 import math
 import typing
+from collections.abc import Sequence
 
-from arena_robots.audio import SPEED_OF_SOUND_MPS
+from arena_robots.audio import SPEED_OF_SOUND_MPS, Vec3
 
 from arena_auditory.propagation import Emission, Listener, PropagationConfig, PropagationScene, Reception, bearing_rad
 
 MIN_SELF_DISTANCE_M = 0.01
+
+
+def drive_distances(points: Sequence[Vec3], microphone: Vec3) -> tuple[float, ...]:
+    """Distance from each drive point to one microphone of the robot's own array, floored at MIN_SELF_DISTANCE_M."""
+    return tuple(max(math.dist(point, microphone), MIN_SELF_DISTANCE_M) for point in points)
 
 
 class SelfPathBackend:
