@@ -268,7 +268,7 @@ arena launch acoustics:=arena \
 A relative frame resolves below the robot's frame prefix. The listener is
 inactive while the robot is absent or TF cannot resolve the frame.
 
-World microphones are authored per level in `world.yaml` beside `zones`:
+World microphones are authored per level in `world.yaml` under the level's `microphones`:
 
 ```yaml
 microphones:
@@ -277,7 +277,7 @@ microphones:
 
 World loading rejects missing zones, duplicate ids, positions outside the zone,
 ceiling placements in zones without a ceiling and heights more than 5 cm off an
-explicit `ceiling_height`.
+explicit ceiling `height`.
 
 ## Rendering
 
@@ -388,20 +388,19 @@ resolves its placement and publishes its live state as
 
 - `name`: unique among world, scenario and launch sounds.
 - `asset_id`: a `Sound` asset.
-- exactly one of `position`, `entity_ref` or `frame`. `entity_ref` names one
-  static world entity, `offset` then rotates with its yaw. A direct `position`
+- exactly one of `position`, `attach` or `frame`. `attach` names one
+  static world object, `offset` then rotates with its yaw. A direct `position`
   is level-local and needs `level` in a multi-level world. `frame` names a TF
   frame and `offset` is local to it, so a sound on `jackal/base_link` moves
   with the robot. Until the frame exists the source is skipped with a warning.
 - `loop` (default `true`) and `reference_distance_m` (default `1.0`).
 - `semantics`: the `sound` preset, which expands to `sounding` and `volume_db`.
 
-World sounds are authored per zone:
+World sounds are authored per level:
 
 ```yaml
-zones:
-- name: hallway
-  corners: [...]
+levels:
+- id: '0'
   sounds:
   - name: hall_siren
     asset_id: alarm_loop
@@ -442,8 +441,9 @@ the workstation, propagation and robot hearing continue.
 
 ## Propagation and portal routing
 
-On world load, Arena pairs each authored door with the zone on its other side
-and derives an opening portal where two adjacent rooms agree that a shared
+On world load, each door joins the two zones the world semantics `connects`
+through it (stated in `kg.yaml` or derived from geometry), a door with
+fewer than two zones is reported unpaired, and Arena derives an opening portal where two adjacent rooms agree that a shared
 boundary span is open. Each authored zone is one pyroomacoustics room.
 Same-zone sounds use one room-local impulse response. Cross-zone sounds follow
 a door or opening route up to `portal.max_hops`, composed from room-local

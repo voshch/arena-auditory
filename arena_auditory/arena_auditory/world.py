@@ -15,12 +15,13 @@ import shapely
 import shapely.errors
 import yaml
 from arena_robots.audio import Vec3
+from arena_simulation_setup.kg import Scene
 from arena_simulation_setup.tree.World import (
     MICROPHONE_PLACEMENT_TOLERANCE_M,
-    LevelDescription,
-    MultiLevelWorldView,
-    WorldDescription,
+    Level,
+    World,
     WorldIdentifier,
+    WorldView,
 )
 from shapely.affinity import translate
 
@@ -31,7 +32,9 @@ from arena_auditory.rooms import (
     AcousticRoomSpecBuilder,
     AcousticWorldGraph,
     UnpairedDoor,
+    world_levels,
     world_zones,
+    zone_ceiling_height,
 )
 from arena_auditory.shared import ListenerId
 
@@ -77,15 +80,16 @@ class AcousticScene:
     )
 
     @classmethod
-    def from_world(cls, world: WorldDescription | LevelDescription, *, ceiling_height_m: float) -> AcousticScene:
+    def from_world(cls, world: World | Level, *, ceiling_height_m: float) -> AcousticScene:
         zones = []
         walls = []
 
         for zone in world_zones(world):
-            polygon = shapely.Polygon([(corner.x, corner.y) for corner in zone.corners])
-            zones.append(AcousticZone(name=zone.name, polygon=polygon, floor_material_id=zone.material.name))
+            polygon = shapely.Polygon([(corner.x, corner.y) for corner in zone.polygon])
+            zones.append(AcousticZone(name=zone.name, polygon=polygon, floor_material_id=zone.floor.name if zone.floor is not None else ""))
 
-            for wall in zone.walls:
+        for _, level in world_levels(world):
+            for wall in level.all_walls:
                 material_id = wall.material.name if wall.material is not None else "default"
                 walls.append(AcousticWall(start=(wall.start.x, wall.start.y), end=(wall.end.x, wall.end.y), material_id=material_id))
 
@@ -112,18 +116,16 @@ class AcousticScene:
 
 
 def compact_authored_world(
-    world_view: MultiLevelWorldView,
-    world_description: WorldDescription,
+    world_view: WorldView,
+    world: World,
     *,
     disk_map: bool = False,
-) -> tuple[LevelDescription, Offset2D | None]:
+) -> tuple[Level, Offset2D | None]:
     """Compact a world onto one grid the way the runtime does and return it with the authored map origin."""
-    level_origins = world_view.level_origins()
-    world_description.apply_elevator_door_sides()
-    compacted = world_description.compact_world(level_origins if level_origins is not None else dict.fromkeys(world_description.levels, (0.0, 0.0)))
+    compacted = world.compact_world(world.level_origins() if len(world.levels) > 1 else dict.fromkeys(world.levels, (0.0, 0.0)))
     if disk_map:
-        for level_id in sorted(world_description.levels):
-            map_yaml = Path(world_view.path) / str(level_id) / "map.yaml"
+        for level_id in sorted(world.levels):
+            map_yaml = world_view.map_yaml(level_id)
             if map_yaml.exists():
                 origin = yaml.safe_load(map_yaml.read_text(encoding="utf-8")).get("origin", (0.0, 0.0, 0.0))
                 return compacted, (float(origin[0]), float(origin[1]))
@@ -235,7 +237,7 @@ def parse_robot_microphones(raw: str) -> tuple[RobotMicrophoneSpec, ...]:
 
 
 def world_microphones(
-    world: WorldDescription,
+    world: World,
     ceiling_height_m: float,
     level_origins: dict[str, tuple[float, float]] | None = None,
 ) -> tuple[WorldMicrophoneSpec, ...]:
@@ -249,7 +251,7 @@ def world_microphones(
             offset = level_origins.get(str(level_id), (0.0, 0.0)) if level_origins is not None and frame == "map" else (0.0, 0.0)
             ceiling_height = None
             if microphone.placement == "ceiling":
-                ceiling_height = float(zone.ceiling_height) if zone.ceiling_height is not None else float(ceiling_height_m)
+                ceiling_height = zone_ceiling_height(zone, ceiling_height_m)
                 if frame == "map" and not math.isclose(float(microphone.position.z), ceiling_height, abs_tol=MICROPHONE_PLACEMENT_TOLERANCE_M):
                     raise ValueError(f"microphone {microphone.listener_id!r} z={microphone.position.z} does not match ceiling height {ceiling_height}")
             specs.append(
@@ -405,10 +407,10 @@ class AcousticWorld:
         """Resolve and build a world in its authored frame. Raises one of LOAD_ERRORS."""
         world_view = WorldIdentifier(world).resolve_sync()
         description = world_view.load()
-        microphones = world_microphones(description, config.ceiling_height_m, level_origins=world_view.level_origins())
+        microphones = world_microphones(description, config.ceiling_height_m, level_origins=description.level_origins() if len(description.levels) > 1 else None)
         compacted, authored_origin = compact_authored_world(world_view, description, disk_map=config.map_source is MapSource.DISK)
         rooms = AcousticRoomSpecBuilder(config.ceiling_height_m).from_world(compacted)
-        graph = AcousticWorldGraph.from_world(compacted, rooms, config)
+        graph = AcousticWorldGraph.from_world(compacted, rooms, config, description.kg if description.kg is not None else Scene())
         return cls(
             name=world,
             path=Path(world_view.path),
@@ -424,7 +426,7 @@ class AcousticWorld:
         """Translate into the frame of a runtime map with this origin. Raises ValueError when zones exist without an authored origin."""
         if self.authored_origin is None:
             if self.scene.zones:
-                raise ValueError(f"cannot realize acoustic world {self.name!r}: no authored map origin (debug.map_source=disk without a level map.yaml)")
+                raise ValueError(f"cannot realize acoustic world {self.name!r}: no authored map origin (debug.map_source=disk without a level preview map)")
             return self
         offset = (float(map_origin_xy[0]) - self.authored_origin[0], float(map_origin_xy[1]) - self.authored_origin[1])
         dx, dy = offset[0] - self.offset[0], offset[1] - self.offset[1]

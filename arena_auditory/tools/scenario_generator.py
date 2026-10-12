@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import Any, Iterable, Sequence
 
 import yaml
+from arena_simulation_setup.tree.World import Level, WorldView
+from arena_simulation_setup.tree.World.Scenario import SCENARIO_FORMAT
 from PIL import Image, ImageFilter
 
 GENERATED_PREFIX = "hearing__"
@@ -91,12 +93,22 @@ class PlannedScenario:
         return self.world_dir / "scenarios" / self.name / "scenario.yaml"
 
 
+def _first_level(view: WorldView) -> tuple[Level, Path] | None:
+    """The first level of a world and its preview map, None when the world has no level or that level no preview."""
+    world = view.load(validate=False)
+    if not world.levels:
+        return None
+    level_id, level = next(iter(world.levels.items()))
+    map_yaml = view.map_yaml(level_id)
+    return (level, map_yaml) if map_yaml.is_file() else None
+
+
 def discover_worlds(root: str | Path, patterns: Sequence[str] = ()) -> list[Path]:
     root_path = Path(root)
     if not root_path.is_dir():
         raise FileNotFoundError(f"worlds root does not exist: {root_path}")
     worlds = sorted(
-        (path for path in root_path.iterdir() if path.is_dir() and (path / "0" / "world.yaml").is_file() and (path / "0" / "map.yaml").is_file()),
+        (path for path in root_path.iterdir() if path.is_dir() and WorldView(path).world_path.is_file() and _first_level(WorldView(path)) is not None),
         key=lambda path: path.name,
     )
     if patterns:
@@ -117,8 +129,7 @@ def scenario_name(world: str, robot_state: str, pedestrian_count: int, direction
     return f"{GENERATED_PREFIX}world-{world}__robot-{robot_state}__pedestrians-{pedestrian_count}__ends-{direction}"
 
 
-def _load_map(level_dir: Path) -> tuple[MapFrame, Image.Image]:
-    map_path = level_dir / "map.yaml"
+def _load_map(map_path: Path) -> tuple[MapFrame, Image.Image]:
     raw = yaml.safe_load(map_path.read_text(encoding="utf-8"))
     if not isinstance(raw, dict):
         raise ValueError(f"{map_path} must contain a mapping")
@@ -127,7 +138,7 @@ def _load_map(level_dir: Path) -> tuple[MapFrame, Image.Image]:
     if resolution <= 0 or not isinstance(origin, list) or len(origin) < 3:
         raise ValueError(f"{map_path} has an invalid resolution or origin")
 
-    image_path = level_dir / str(raw["image"])
+    image_path = map_path.parent / str(raw["image"])
     with Image.open(image_path) as source:
         grayscale = source.convert("L")
     width, height = grayscale.size
@@ -185,21 +196,14 @@ def _largest_component(cells: set[Cell]) -> set[Cell]:
     return largest
 
 
-def _load_world_polygons(world_path: Path) -> list[list[Point2]]:
-    raw = yaml.safe_load(world_path.read_text(encoding="utf-8"))
-    zones = raw.get("zones") if isinstance(raw, dict) else raw
-    if not isinstance(zones, list) or not zones:
-        raise ValueError(f"{world_path} must contain a non-empty zones list")
+def _load_world_polygons(world_path: Path, level: Level) -> list[list[Point2]]:
+    if not level.zones:
+        raise ValueError(f"{world_path} level {level.id!r} must contain a non-empty zones list")
     polygons: list[list[Point2]] = []
-    for index, zone in enumerate(zones):
-        corners = zone.get("corners", []) if isinstance(zone, dict) else []
-        if len(corners) < 3:
+    for index, zone in enumerate(level.zones):
+        if len(zone.polygon) < 3:
             raise ValueError(f"{world_path}: zone {index} has fewer than three corners")
-        try:
-            polygon = [(float(point["x"]), float(point["y"])) for point in corners]
-        except (KeyError, TypeError, ValueError) as exc:
-            raise ValueError(f"{world_path}: zone {index} has invalid corner coordinates") from exc
-        polygons.append(polygon)
+        polygons.append([(float(point.x), float(point.y)) for point in zone.polygon])
     return polygons
 
 
@@ -359,13 +363,17 @@ def _simplify_cells(path: Sequence[Cell], safe_cells: set[Cell]) -> list[Cell]:
 
 def derive_world_route(world_dir: str | Path) -> WorldRoute:
     path = Path(world_dir)
-    level = path / "0"
-    frame, free = _load_map(level)
+    view = WorldView(path)
+    first = _first_level(view)
+    if first is None:
+        raise ValueError(f"{path.name}: world has no level with a preview map")
+    level, map_yaml = first
+    frame, free = _load_map(map_yaml)
     robot_cells = _safe_cells(free, frame, ROBOT_CLEARANCE_M)
     if not robot_cells:
         raise ValueError(f"{path.name}: map contains no free cells after robot-clearance inflation")
     safe_cells = _largest_component(robot_cells)
-    polygons = _load_world_polygons(level / "world.yaml")
+    polygons = _load_world_polygons(view.world_path, level)
 
     seed = min(safe_cells, key=lambda cell: frame.cell_to_world(cell))
     first_distances = _dijkstra(seed, safe_cells)
@@ -387,7 +395,7 @@ def derive_world_route(world_dir: str | Path) -> WorldRoute:
     route = tuple(_xy(frame.cell_to_world(cell)) for cell in grid_path)
 
     if not _route_agrees_with_world(route, polygons, frame.resolution):
-        raise ValueError(f"{path.name}: RViz-aligned route does not agree with world.yaml geometry")
+        raise ValueError(f"{path.name}: RViz-aligned route does not agree with the world geometry")
     length = _length(route)
     if length <= NEAR_ROBOT_OFFSET_M + FIRST_TARGET_LEAD_M + ROBOT_STOP_CLEARANCE_M + FORMATION_LONGITUDINAL_M:
         raise ValueError(f"{path.name}: route length {length:.2f} m is too short for the pedestrian formation")
@@ -485,7 +493,7 @@ def render_scenario(route: WorldRoute, robot_state: str, pedestrian_count: int, 
     route_total = _length(pedestrian_route)
     base_start = NEAR_ROBOT_OFFSET_M if direction == "a-to-b" else 0.0
     end_distance = route_total if direction == "a-to-b" else route_total - ROBOT_STOP_CLEARANCE_M
-    dynamic = []
+    humans = []
     spawn_points: list[Point2] = []
     terminal_points: list[Point2] = []
     for index, (longitudinal, lateral) in enumerate(_formation_offsets(pedestrian_count), start=1):
@@ -511,7 +519,7 @@ def render_scenario(route: WorldRoute, robot_state: str, pedestrian_count: int, 
         waypoints = _deduplicate([first_target, *suffix[1:-1], terminal])
         if not waypoints or math.dist(spawn, waypoints[0]) < 0.10:
             raise ValueError(f"{route.world}: pedestrian {index} starts on its first waypoint")
-        dynamic.append(
+        humans.append(
             {
                 "name": f"ped_{index}",
                 "model": PEDESTRIAN_MODEL,
@@ -528,15 +536,15 @@ def render_scenario(route: WorldRoute, robot_state: str, pedestrian_count: int, 
         spawn_points.append(spawn)
         terminal_points.append(terminal)
 
-    poses = [tuple(human["pose"][:2]) for human in dynamic]
+    poses = [tuple(human["pose"][:2]) for human in humans]
     if len(set(poses)) != pedestrian_count:
         raise ValueError(f"{route.world}: pedestrian formation contains duplicate spawn positions")
     if any(math.dist(left, right) < 2 * PEDESTRIAN_CLEARANCE_M for left, right in zip(poses, poses[1:], strict=False)):
         raise ValueError(f"{route.world}: pedestrian formation contains overlapping spawn footprints")
     return {
+        "format": SCENARIO_FORMAT,
         "robots": [{"start": _pose(robot_route[0], robot_yaw), "phases": phases}],
-        "static": [],
-        "dynamic": dynamic,
+        "humans": humans,
     }
 
 

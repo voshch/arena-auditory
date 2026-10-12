@@ -33,8 +33,9 @@ CORRIDOR_LEGS = ((1.0, 1.0, 11.0, 3.2), (8.8, 1.0, 11.0, 11.0))
 
 @pytest.fixture
 def world_dir(tmp_path: Path) -> Path:
-    level = tmp_path / "l_corridor" / "0"
-    level.mkdir(parents=True)
+    world = tmp_path / "l_corridor"
+    preview = world / "map"
+    preview.mkdir(parents=True)
     pixels = int(MAP_SIZE_M / RESOLUTION)
     image = Image.new("L", (pixels, pixels), 0)
     draw = ImageDraw.Draw(image)
@@ -44,12 +45,12 @@ def world_dir(tmp_path: Path) -> Path:
             [int(x0 / RESOLUTION), pixels - int(y1 / RESOLUTION), int(x1 / RESOLUTION) - 1, pixels - int(y0 / RESOLUTION) - 1],
             fill=255,
         )
-        zones.append({"corners": [{"x": x0, "y": y0}, {"x": x1, "y": y0}, {"x": x1, "y": y1}, {"x": x0, "y": y1}]})
-    image.save(level / "map.png")
-    map_yaml = {"image": "map.png", "resolution": RESOLUTION, "origin": [0.0, 0.0, 0.0], "negate": 0, "occupied_thresh": 0.65, "free_thresh": 0.196}
-    (level / "map.yaml").write_text(yaml.safe_dump(map_yaml), encoding="utf-8")
-    (level / "world.yaml").write_text(yaml.safe_dump({"zones": zones}), encoding="utf-8")
-    return tmp_path / "l_corridor"
+        zones.append({"name": f"leg_{len(zones)}", "polygon": [[x0, y0], [x1, y0], [x1, y1], [x0, y1]]})
+    image.save(preview / "0.png")
+    map_yaml = {"image": "0.png", "resolution": RESOLUTION, "origin": [0.0, 0.0, 0.0], "negate": 0, "occupied_thresh": 0.65, "free_thresh": 0.196}
+    (preview / "0.yaml").write_text(yaml.safe_dump(map_yaml), encoding="utf-8")
+    (world / "world.yaml").write_text(yaml.safe_dump({"format": "arena-world/2", "levels": [{"id": "0", "zones": zones}]}), encoding="utf-8")
+    return world
 
 
 def _matrix(world_dir: Path) -> dict[tuple[str, int, str], dict[str, Any]]:
@@ -63,12 +64,12 @@ def test_direction_changes_pedestrians_without_moving_robot(world_dir: Path) -> 
 
     assert matrix["idle", 3, "a-to-b"]["robots"][0] == matrix["idle", 3, "b-to-a"]["robots"][0]
     assert matrix["moving", 3, "a-to-b"]["robots"][0] == matrix["moving", 3, "b-to-a"]["robots"][0]
-    assert math.dist(matrix["idle", 3, "a-to-b"]["dynamic"][0]["pose"][:2], route[0]) < 2.0
-    assert math.dist(matrix["idle", 3, "b-to-a"]["dynamic"][0]["pose"][:2], route[-1]) < 1.0
+    assert math.dist(matrix["idle", 3, "a-to-b"]["humans"][0]["pose"][:2], route[0]) < 2.0
+    assert math.dist(matrix["idle", 3, "b-to-a"]["humans"][0]["pose"][:2], route[-1]) < 1.0
 
 
 def test_three_pedestrians_are_separate_and_have_immediate_moving_targets(world_dir: Path) -> None:
-    people = _matrix(world_dir)["moving", 3, "a-to-b"]["dynamic"]
+    people = _matrix(world_dir)["moving", 3, "a-to-b"]["humans"]
     clearance = 2 * scenario_generator.PEDESTRIAN_CLEARANCE_M
 
     assert len({tuple(person["pose"][:2]) for person in people}) == 3
@@ -80,13 +81,25 @@ def test_three_pedestrians_are_separate_and_have_immediate_moving_targets(world_
     assert all(math.dist(person["pose"][:2], person["waypoints"][0][:2]) >= 0.10 for person in people)
 
 
+def test_generated_scenarios_are_format2_and_load(world_dir: Path) -> None:
+    from arena_simulation_setup.tree.World.Scenario import ScenarioView
+
+    scenarios = scenario_generator.plan_world(world_dir)
+    scenario_generator.write_scenarios(scenarios)
+    loaded = ScenarioView(scenarios[0].path.parent).load()
+
+    assert all(scenario.data["format"] == "arena-scenario/2" for scenario in scenarios)
+    assert len(loaded.robots) == 1
+    assert [human.name for human in loaded.humans] == [human["name"] for human in scenarios[0].data["humans"]]
+
+
 def test_regenerating_written_scenarios_is_stable(world_dir: Path) -> None:
     assert scenario_generator.write_scenarios(scenario_generator.plan_world(world_dir)) == (12, 0)
     assert scenario_generator.write_scenarios(scenario_generator.plan_world(world_dir)) == (0, 12)
 
 
 def test_all_generated_pedestrians_use_bundled_model(world_dir: Path) -> None:
-    models = {person["model"] for scenario in _matrix(world_dir).values() for person in scenario["dynamic"]}
+    models = {person["model"] for scenario in _matrix(world_dir).values() for person in scenario["humans"]}
     assert models == {"arenian"}
 
 

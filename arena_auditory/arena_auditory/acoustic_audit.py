@@ -11,7 +11,8 @@ import numpy as np
 import yaml
 from ament_index_python.packages import get_package_share_directory
 from arena_rclpy_mixins.param_groups import configure
-from arena_simulation_setup.tree.World import MultiLevelWorldView, WorldIdentifier
+from arena_simulation_setup.kg import Scene
+from arena_simulation_setup.tree.World import WorldIdentifier, WorldView
 from PIL import Image
 from shapely.geometry import Point, Polygon
 
@@ -50,18 +51,18 @@ def audit_world(world_name: str, *, stride_cells: int) -> AcousticWorldAudit:
     return audit_world_view(world_name, WorldIdentifier(world_name).resolve_sync(), stride_cells=stride_cells)
 
 
-def audit_world_view(world_name: str, world_view: MultiLevelWorldView, *, stride_cells: int) -> AcousticWorldAudit:
-    """Rooms, portals, zone overlaps per level, and free cells of every level map.yaml outside all zones."""
+def audit_world_view(world_name: str, world_view: WorldView, *, stride_cells: int) -> AcousticWorldAudit:
+    """Rooms, portals, zone overlaps per level, and free cells of every level preview map outside all zones."""
     if stride_cells <= 0:
         raise ValueError("stride_cells must be positive")
     world = world_view.load()
     config = configure(WorldConfig, WorldGroup, PortalGroup)
     rooms = AcousticRoomSpecBuilder(config.ceiling_height_m).from_world(world)
-    graph = AcousticWorldGraph.from_world(world, rooms, config)
+    graph = AcousticWorldGraph.from_world(world, rooms, config, world.kg if world.kg is not None else Scene())
 
     overlaps: list[tuple[str, str]] = []
     for level in world.levels.values():
-        level_zones = [(str(zone.name), Polygon([(float(c.x), float(c.y)) for c in zone.corners])) for zone in level.zones]
+        level_zones = [(str(zone.name), Polygon([(float(c.x), float(c.y)) for c in zone.polygon])) for zone in level.zones]
         for index, (first_name, first) in enumerate(level_zones):
             for second_name, second in level_zones[index + 1 :]:
                 if first.intersection(second).area > 1e-6:
@@ -72,14 +73,13 @@ def audit_world_view(world_name: str, world_view: MultiLevelWorldView, *, stride
     examples: list[tuple[float, float]] = []
     map_issues: list[str] = []
     for level_id in sorted(world.levels):
-        level_zone_polygons = tuple(Polygon([(float(corner.x), float(corner.y)) for corner in level_zone.corners]) for level_zone in world.levels[level_id].zones)
-        level_root = Path(world_view.path) / str(level_id)
-        map_yaml = level_root / "map.yaml"
+        level_zone_polygons = tuple(Polygon([(float(corner.x), float(corner.y)) for corner in level_zone.polygon]) for level_zone in world.levels[level_id].zones)
+        map_yaml = world_view.map_yaml(level_id)
         if not map_yaml.exists():
-            map_issues.append(f"level {level_id}: missing map.yaml")
+            map_issues.append(f"level {level_id}: missing preview map {map_yaml.name!r}")
             continue
         config = yaml.safe_load(map_yaml.read_text(encoding="utf-8"))
-        image_path = level_root / str(config["image"])
+        image_path = map_yaml.parent / str(config["image"])
         if not image_path.exists():
             map_issues.append(f"level {level_id}: missing map image {image_path.name!r}")
             continue
