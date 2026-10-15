@@ -549,6 +549,22 @@ class AcousticPortalRoute:
         return len(self.portals)
 
 
+def corner_loss_db(deflection_rad: float, incoming_m: float, outgoing_m: float, *, reference_hz: float, speed_of_sound_mps: float) -> float:
+    """Maekawa attenuation of the detour a route makes at a portal, in the Kurze-Anderson form without its grazing term."""
+    if incoming_m * outgoing_m == 0.0:
+        return 0.0
+    chord = math.sqrt((incoming_m - outgoing_m) ** 2 + 4.0 * incoming_m * outgoing_m * math.cos(0.5 * deflection_rad) ** 2)
+    detour = 4.0 * incoming_m * outgoing_m * math.sin(0.5 * deflection_rad) ** 2 / (incoming_m + outgoing_m + chord)
+    if detour == 0.0:
+        return 0.0
+    root = math.sqrt(4.0 * math.pi * detour * reference_hz / speed_of_sound_mps)
+    return 20.0 * math.log10(root / math.tanh(root))
+
+
+def deflection_rad(incoming: Point2D, outgoing: Point2D) -> float:
+    return math.atan2(abs(incoming[0] * outgoing[1] - incoming[1] * outgoing[0]), incoming[0] * outgoing[0] + incoming[1] * outgoing[1])
+
+
 def _portal_adjacency(portals: tuple[AcousticPortal, ...]) -> dict[str, tuple[AcousticPortal, ...]]:
     adjacency: dict[str, list[AcousticPortal]] = {}
     for portal in portals:
@@ -740,12 +756,19 @@ class AcousticWorldGraph:
         route_loss_db_per_m: float,
         door_loss_db: float,
         opening_loss_db: float,
+        corner_reference_hz: float,
+        speed_of_sound_mps: float,
     ) -> AcousticPortalRoute | None:
-        """Return the least-cost simple portal route between two rooms."""
+        """Return the least-cost simple portal route between two rooms, portal, length and corner losses summed."""
         if source_zone == listener_zone:
             return AcousticPortalRoute(zones=(source_zone,), portals=())
         if max_hops <= 0:
             return None
+
+        def corner(previous: Point2D, at: Point2D, following: Point2D) -> float:
+            incoming = (at[0] - previous[0], at[1] - previous[1])
+            outgoing = (following[0] - at[0], following[1] - at[1])
+            return corner_loss_db(deflection_rad(incoming, outgoing), math.hypot(*incoming), math.hypot(*outgoing), reference_hz=corner_reference_hz, speed_of_sound_mps=speed_of_sound_mps)
 
         # (estimated total cost, sequence, accumulated cost, zone, anchor,
         #  zones, portals)
@@ -785,6 +808,10 @@ class AcousticWorldGraph:
                 segment_distance = math.dist(anchor, center)
                 portal_loss = portal.loss_db if portal.loss_db is not None else (opening_loss_db if portal.portal_kind == "opening" else door_loss_db)
                 next_cost = cost + portal_loss + route_loss_db_per_m * segment_distance
+                if route:
+                    next_cost += corner(route[-2].center_xy if len(route) > 1 else source_xy, anchor, center)
+                if neighbor == listener_zone:
+                    next_cost += corner(anchor, center, listener_xy)
                 heuristic = route_loss_db_per_m * math.dist(center, listener_xy)
                 heapq.heappush(
                     queue,

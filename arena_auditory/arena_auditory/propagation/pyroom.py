@@ -174,6 +174,8 @@ class PyroomBackend:
             route_loss_db_per_m=portal.route_loss_db_per_m,
             door_loss_db=portal.door_loss_db,
             opening_loss_db=portal.opening_loss_db,
+            corner_reference_hz=portal.corner_reference_hz,
+            speed_of_sound_mps=self._adapter.speed_of_sound_mps,
         )
         if route is not None:
             self._route_verdicts[zones] = "routable"
@@ -187,6 +189,8 @@ class PyroomBackend:
             route_loss_db_per_m=portal.route_loss_db_per_m,
             door_loss_db=portal.door_loss_db,
             opening_loss_db=portal.opening_loss_db,
+            corner_reference_hz=portal.corner_reference_hz,
+            speed_of_sound_mps=self._adapter.speed_of_sound_mps,
         )
         verdict = "portal_route_exceeds_max_hops" if unrestricted is not None else "no_portal_route_between_zones"
         self._route_verdicts[zones] = verdict

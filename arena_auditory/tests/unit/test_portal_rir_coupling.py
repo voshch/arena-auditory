@@ -266,6 +266,8 @@ def test_supplied_route_skips_the_route_search() -> None:
         route_loss_db_per_m=config.route_loss_db_per_m,
         door_loss_db=config.door_loss_db,
         opening_loss_db=config.opening_loss_db,
+        corner_reference_hz=config.corner_reference_hz,
+        speed_of_sound_mps=adapter.speed_of_sound_mps,
     )
 
     result = coupler.compute(source_zone="a", listener_zone="b", source_position_m=source, listener_position_m=listener, route=route)

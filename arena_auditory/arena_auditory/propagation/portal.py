@@ -11,7 +11,7 @@ import numpy as np
 from scipy.signal import fftconvolve
 
 from arena_auditory.propagation.pyroom_adapter import DIRECT_WINDOW_HALF_SAMPLES, PyroomacousticsAdapter, RirUnavailable, RoomImpulseResponse, direct_arrival, retarget_rir
-from arena_auditory.rooms import AcousticPortal, AcousticPortalRoute, AcousticWorldGraph, Position3D
+from arena_auditory.rooms import AcousticPortal, AcousticPortalRoute, AcousticWorldGraph, Position3D, corner_loss_db, deflection_rad
 
 
 @attrs.frozen
@@ -71,22 +71,6 @@ class _SplitRir:
 
 def _segment_length(first: Position3D, second: Position3D) -> float:
     return max(math.dist(first, second), 1e-3)
-
-
-def corner_loss_db(deflection_rad: float, incoming_m: float, outgoing_m: float, *, reference_hz: float, speed_of_sound_mps: float) -> float:
-    """Maekawa attenuation of the detour a route makes at a portal, in the Kurze-Anderson form without its grazing term."""
-    if incoming_m * outgoing_m == 0.0:
-        return 0.0
-    chord = math.sqrt((incoming_m - outgoing_m) ** 2 + 4.0 * incoming_m * outgoing_m * math.cos(0.5 * deflection_rad) ** 2)
-    detour = 4.0 * incoming_m * outgoing_m * math.sin(0.5 * deflection_rad) ** 2 / (incoming_m + outgoing_m + chord)
-    if detour == 0.0:
-        return 0.0
-    root = math.sqrt(4.0 * math.pi * detour * reference_hz / speed_of_sound_mps)
-    return 20.0 * math.log10(root / math.tanh(root))
-
-
-def _deflection_rad(incoming: tuple[float, float], outgoing: tuple[float, float]) -> float:
-    return math.atan2(abs(incoming[0] * outgoing[1] - incoming[1] * outgoing[0]), incoming[0] * outgoing[0] + incoming[1] * outgoing[1])
 
 
 def _split_direct(rir: RoomImpulseResponse, distance_m: float, speed_of_sound_mps: float) -> _SplitRir:
@@ -176,6 +160,8 @@ class MultiPortalRirCoupler:
                 route_loss_db_per_m=self._config.route_loss_db_per_m,
                 door_loss_db=self._config.door_loss_db,
                 opening_loss_db=self._config.opening_loss_db,
+                corner_reference_hz=self._config.corner_reference_hz,
+                speed_of_sound_mps=self._adapter.speed_of_sound_mps,
             )
         if route is None or not route.portals:
             raise RirUnavailable(f"no portal route connects {source_zone!r} and {listener_zone!r}")
@@ -265,7 +251,7 @@ class MultiPortalRirCoupler:
             incoming_m = math.hypot(*incoming)
             corner_losses.append(
                 corner_loss_db(
-                    _deflection_rad(incoming, outgoing),
+                    deflection_rad(incoming, outgoing),
                     incoming_m,
                     math.hypot(*outgoing),
                     reference_hz=self._config.corner_reference_hz,

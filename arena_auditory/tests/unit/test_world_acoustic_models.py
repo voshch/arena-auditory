@@ -34,6 +34,8 @@ def _route(graph: AcousticWorldGraph, source_zone: str, listener_zone: str, *, m
         route_loss_db_per_m=PORTAL_CONFIG.route_loss_db_per_m,
         door_loss_db=PORTAL_CONFIG.door_loss_db,
         opening_loss_db=PORTAL_CONFIG.opening_loss_db,
+        corner_reference_hz=PORTAL_CONFIG.corner_reference_hz,
+        speed_of_sound_mps=343.0,
     )
 
 
