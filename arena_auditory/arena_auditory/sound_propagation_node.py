@@ -479,10 +479,10 @@ class SoundPropagationNode(ArenaMixinNode):
             listeners = self._listeners_for(source, include_peds=self._params.PEDESTRIAN_LISTENERS_DISCRETE_ENABLED.value)
         emission = Emission.from_source(source, position)
         header = Header(stamp=msg.header.stamp, frame_id=frame)
-        for _, reception in self._propagate_many(emission, listeners.values()):
-            if reception.audible or self._params.INAUDIBLE_ENABLED.value:
-                self._publish_impulse(reception, msg.header.stamp)
-                self._heard_pub.publish(reception.heard_msg(header, source_msg))
+        receptions = [reception for _, reception in self._propagate_many(emission, listeners.values()) if reception.audible or self._params.INAUDIBLE_ENABLED.value]
+        for reception in receptions:
+            self._publish_impulse(reception, msg.header.stamp)
+            self._heard_pub.publish(reception.heard_msg(header, source_msg))
 
     def _on_continuous_source(self, msg: ContinuousAudioSourceState) -> None:
         if not self._params.ENABLED.value or not msg.source.kind.strip():
@@ -516,7 +516,7 @@ class SoundPropagationNode(ArenaMixinNode):
             return
         position, source_msg, frame = located
         emission = Emission.from_source(source, position)
-        header = Header(stamp=state.header.stamp, frame_id=frame)
+        header = Header(stamp=self.get_clock().now().to_msg(), frame_id=frame)
         quantum = self._quantization.value
         source_signature = (
             source.agent_id,
@@ -533,25 +533,28 @@ class SoundPropagationNode(ArenaMixinNode):
         def signature(listener: Listener) -> tuple[Hashable, ...]:
             return (*source_signature, *(round(float(value) / quantum) for value in listener.position))
 
+        receptions: list[Reception] = []
         misses: list[Listener] = []
         for listener in self._listeners_for(source, include_peds=True).values():
             cached = self._continuous_cache.get((source.id, listener.id))
             if cached is not None and cached[0] == signature(listener):
-                self._publish_continuous(source.id, attrs.evolve(cached[1], listener=listener), state, header, source_msg)
+                receptions.append(attrs.evolve(cached[1], listener=listener))
             else:
                 misses.append(listener)
         for listener, reception in self._propagate_many(emission, misses):
             self._continuous_cache[(source.id, listener.id)] = (signature(listener), reception)
-            self._publish_continuous(source.id, reception, state, header, source_msg)
+            receptions.append(reception)
+        for reception in receptions:
+            self._publish_continuous(source.id, reception, header, source_msg)
 
-    def _publish_continuous(self, source_id: str, reception: Reception, state: ContinuousAudioSourceState, header: Header, source_msg: SoundSource) -> None:
+    def _publish_continuous(self, source_id: str, reception: Reception, header: Header, source_msg: SoundSource) -> None:
         key = (source_id, reception.listener.id)
         if not reception.audible and not self._params.INAUDIBLE_ENABLED.value:
             previous = self._last_continuous.pop(key, None)
             if previous is not None:
                 self._continuous_pub.publish(self._stopped(previous))
             return
-        self._publish_impulse(reception, state.header.stamp)
+        self._publish_impulse(reception, header.stamp)
         output = reception.continuous_msg(header, source_msg)
         self._last_continuous[key] = output
         self._continuous_pub.publish(output)

@@ -337,6 +337,47 @@ def test_continuous_source_without_updates_stops_after_the_stale_window(steady_h
     assert "robot:other" not in target.gates
 
 
+@pytest.mark.usefixtures("default_sounds")
+def test_continuous_channel_past_the_max_age_stops_while_a_fresh_channel_keeps_rendering(array_harness: Harness) -> None:
+    import rclpy
+    from rclpy.parameter import Parameter
+    from rosgraph_msgs.msg import Clock
+
+    node = array_harness.node
+    driver = rclpy.create_node(f"renderer_clock_driver_{uuid.uuid4().hex[:8]}", namespace=array_harness.namespace)
+    clock_pub = driver.create_publisher(Clock, array_harness.clock_topic, 10)
+    try:
+        _spin_until([driver, node], lambda: clock_pub.get_subscription_count() > 0)
+        now = Clock()
+        now.clock.sec = 20
+        clock_pub.publish(now)
+        _spin_until([driver, node], lambda: node.get_clock().now().nanoseconds == 20_000_000_000)
+    finally:
+        driver.destroy_node()
+    assert node.set_parameters([Parameter("render.continuous.max_age_s", value=1.0)])[0].successful
+
+    fresh = _drivetrain_state(5)
+    fresh.header.stamp.sec = 19
+    fresh.header.stamp.nanosec = 500_000_000
+    stale = _drivetrain_state(5)
+    stale.reception.listener_id = f"array:{ROBOT}:rear_right"
+    stale.header.stamp.sec = 18
+    node._on_continuous(fresh)
+    node._on_continuous(stale)
+    target = node._targets[ROBOT]
+    front_left, rear_right = node.spec.channel_names.index("front_left"), node.spec.channel_names.index("rear_right")
+    assert target.streams["robot:other"].active_channels[rear_right]
+
+    node._expire_receptions(target)
+
+    stream = target.streams["robot:other"]
+    assert stream.active_channels[front_left]
+    assert not stream.active_channels[rear_right]
+    assert stream.gains[rear_right] == 0.0
+    assert stream.gains[front_left] > 0.0
+    assert set(target.gates["robot:other"].receptions) == {front_left}
+
+
 def test_heard_event_starts_one_block_past_the_next_unrendered_block(steady_harness: Harness) -> None:
     node = steady_harness.node
     node._skip(5)

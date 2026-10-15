@@ -21,7 +21,7 @@ def _ros_gate():
     pytest.importorskip("task_generator_msgs.msg")
 
 
-def _launch(parameters: dict[str, object] | None = None):
+def _launch(parameters: dict[str, object] | None = None, cli_args: list[str] | None = None):
     """SoundPropagationNode below a unique namespace with parameters given the way a launch file passes them."""
     from arena_auditory.sound_propagation_node import SoundPropagationNode
     from arena_rclpy_mixins import ArenaMixinNode
@@ -32,7 +32,7 @@ def _launch(parameters: dict[str, object] | None = None):
 
     class LaunchArguments(ArenaMixinNode):
         def __init__(self, node_name: str) -> None:
-            super().__init__(node_name, namespace=namespace, parameter_overrides=overrides)
+            super().__init__(node_name, namespace=namespace, parameter_overrides=overrides, cli_args=cli_args)
 
     class LaunchedPropagation(SoundPropagationNode, LaunchArguments):
         pass
@@ -631,4 +631,56 @@ def test_continuous_flush_stops_at_its_budget_and_keeps_the_rest_pending(rclpy_c
         assert {source_id for source_id, _ in propagation._last_continuous} == set(source_ids)
         assert propagation._last_continuous[(left[-1], f"robot:{robot}")].source.position.x == pytest.approx(9.0)
     finally:
+        propagation.destroy_node()
+
+
+def test_continuous_receptions_of_one_pass_arrive_together_stamped_at_listener_sampling(rclpy_context):
+    import itertools
+
+    import rclpy
+    from arena_auditory_msgs.msg import ContinuousHeardSoundState
+    from arena_rclpy_mixins.qos import best_effort
+    from rosgraph_msgs.msg import Clock
+
+    clock_topic = f"/clock_{uuid.uuid4().hex[:8]}"
+    propagation = _launch({"propagation.backend": "legacy", "array.spec": "four_mic", "use_sim_time": True}, cli_args=["--ros-args", "-r", f"/clock:={clock_topic}"])
+    driver = rclpy.create_node(f"stamp_driver_{uuid.uuid4().hex[:8]}")
+    clock_pub = driver.create_publisher(Clock, clock_topic, 10)
+    heard: list[ContinuousHeardSoundState] = []
+    driver.create_subscription(ContinuousHeardSoundState, propagation._continuous_pub.topic_name, heard.append, best_effort(64))
+    robot = _robot_name()
+    listeners = _robot_set(robot, ("front_left", "front_right", "rear_left", "rear_right"))
+    sources = ("environment:radio", "environment:horn")
+
+    def advance(sec: int) -> None:
+        now = Clock()
+        now.clock.sec = sec
+        clock_pub.publish(now)
+        _spin_until(rclpy, [driver, propagation], lambda: propagation.get_clock().now().nanoseconds == sec * 1_000_000_000)
+
+    def flush(count: int) -> list[ContinuousHeardSoundState]:
+        heard.clear()
+        for index, source_id in enumerate(sources):
+            state = _continuous(source_id, position=(2.0 + index, 1.0, 1.0))
+            state.header.stamp.sec = 3
+            propagation._on_continuous_source(state)
+        propagation._flush_continuous()
+        _spin_until(rclpy, [driver], lambda: len(heard) >= count)
+        return list(heard)
+
+    try:
+        _load_map(propagation)
+        _place(propagation, f"{robot}/base_link", 10.0, 1.0)
+        propagation._on_fleet(_fleet(robot))
+        _spin_until(rclpy, [driver, propagation], lambda: clock_pub.get_subscription_count() > 0 and propagation._continuous_pub.get_subscription_count() > 0)
+
+        for sec in (50, 51):
+            advance(sec)
+            received = flush(len(sources) * len(listeners))
+            runs = [(source_id, [message.reception.listener_id for message in run]) for source_id, run in itertools.groupby(received, key=lambda message: message.source.id)]
+            assert sorted(source_id for source_id, _ in runs) == sorted(sources)
+            assert all(set(run) == listeners and len(run) == len(listeners) for _, run in runs)
+            assert {(message.header.stamp.sec, message.header.stamp.nanosec) for message in received} == {(sec, 0)}
+    finally:
+        driver.destroy_node()
         propagation.destroy_node()

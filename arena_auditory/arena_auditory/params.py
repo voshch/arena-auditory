@@ -175,6 +175,7 @@ class RenderGroup(ParamGroup):
     INAUDIBLE_ENABLED = Param[bool]("render.inaudible.enabled", PerRole(array=False, listener=True))
     MIN_LEVEL_DB = Param[float]("render.min_level_db", PerRole(array=-120.0, listener=-20.0), parse=finite)
     LOCKSTEP_ENABLED = Param[bool]("render.lockstep.enabled", PerRole(array=True, listener=False))
+    CONTINUOUS_MAX_AGE_S = Param[float]("render.continuous.max_age_s", 2.0, parse=positive)
 
     def role(self) -> RenderRole:
         return self.ROLE.value

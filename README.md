@@ -49,7 +49,7 @@ the env (`/arena/env_0/task_generator_node/<node>` for env 0):
 
 | Node | Executable | Role |
 |---|---|---|
-| `sound_propagation_node` | `sound_propagation_node` | Turns `SoundEvent` and `ContinuousAudioSourceState` into one `HeardSoundEvent` or `ContinuousHeardSoundState` per listener. Owns every room impulse response and publishes it on `acoustic/impulses`. Serves `runtime/spawn_microphone` and `runtime/remove_microphone`. |
+| `sound_propagation_node` | `sound_propagation_node` | Turns `SoundEvent` and `ContinuousAudioSourceState` into one `HeardSoundEvent` or `ContinuousHeardSoundState` per listener. Publishes the receptions of one source back to back once every listener is propagated, a `ContinuousHeardSoundState` stamped with the sim time the listener poses were taken, a `HeardSoundEvent` with its emission. Owns every room impulse response and publishes it on `acoustic/impulses`. Serves `runtime/spawn_microphone` and `runtime/remove_microphone`. |
 | `human_emitter` | `human_emitter` | Emits `footstep` and `speech` sound events from `arena_peds`. |
 | `robot_emitter` | `robot_emitter` | Publishes the continuous noise sources of every robot, the motor driven by its odometry. |
 | `array_renderer` | `renderer` (`render.role: array`) | Renders the microphone array (`array.spec`) of every fleet robot to PCM, the stems, the monitor and the diagnostics. Plays one robot's monitor on the workstation while `output.enabled`. Runs with `OMP_NUM_THREADS=1`. |
@@ -311,6 +311,11 @@ plays on all of a robot's microphones when any of its `array:<r>:<mic>` or
 `render.min_level_db`, else on none. Near the threshold or at a wall edge a
 sound therefore never reaches only a subset of the microphones, which would
 fake level and delay differences.
+
+A continuous source stops on every microphone after 0.5 s of wall time
+without a reception, and on each microphone whose latest reception is older
+than `render.continuous.max_age_s` (2.0 s) of sim time, whatever the other
+microphones receive.
 
 ### Stems
 

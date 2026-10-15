@@ -127,11 +127,12 @@ class ContinuousLoad:
 
 @dataclass(slots=True)
 class Gate:
-    """Latest reception per channel of one continuous source and the channels that pass, CENTROID for the robot listener."""
+    """Latest reception and its sim stamp per channel of one continuous source and the channels that pass, CENTROID for the robot listener."""
 
     source: SourceSpec
     updated_ns: int
     receptions: dict[int, SoundReception] = field(default_factory=dict)
+    stamps: dict[int, int] = field(default_factory=dict)
     passing: set[int] = field(default_factory=set)
 
 
@@ -676,13 +677,14 @@ class RendererNode(ArenaMixinNode):
         source = self._source(msg.source)
         if source is None:
             return
-        self._update_gate(target, source, reception, channel)
+        self._update_gate(target, source, reception, channel, Time.from_msg(msg.header.stamp).to_nanoseconds())
 
-    def _update_gate(self, target: RenderTarget, source: SourceSpec, reception: SoundReception, channel: int) -> None:
+    def _update_gate(self, target: RenderTarget, source: SourceSpec, reception: SoundReception, channel: int, stamp_ns: int) -> None:
         now_ns = self._steady_clock.now().nanoseconds
         gate = target.gates.setdefault(source.id, Gate(source=source, updated_ns=now_ns))
         gate.source = source
         gate.updated_ns = now_ns
+        gate.stamps[channel] = stamp_ns
         was_admitted = bool(gate.passing)
         if source.active and self._accepts(reception):
             gate.passing.add(channel)
@@ -693,14 +695,18 @@ class RendererNode(ArenaMixinNode):
         admitted = bool(gate.passing)
         changed = tuple(gate.receptions) if admitted != was_admitted else (channel,) if channel != CENTROID else ()
         for each in changed:
-            if streamed(source.model):
-                self._on_stream(target, source, gate.receptions[each], each, admitted)
-            else:
-                self._continuous_channel(target, source, gate.receptions[each], each, admitted)
+            self._voice(target, source, gate.receptions[each], each, admitted)
         if not source.active:
             gate.receptions.pop(channel, None)
+            gate.stamps.pop(channel, None)
             if not gate.receptions and not gate.passing:
                 target.gates.pop(source.id, None)
+
+    def _voice(self, target: RenderTarget, source: SourceSpec, reception: SoundReception, channel: int, admitted: bool) -> None:
+        if streamed(source.model):
+            self._on_stream(target, source, reception, channel, admitted)
+        else:
+            self._continuous_channel(target, source, reception, channel, admitted)
 
     def _expire_gates(self, target: RenderTarget) -> None:
         """Stop every continuous source without an update for CONTINUOUS_STALE_S of wall time."""
@@ -710,8 +716,28 @@ class RendererNode(ArenaMixinNode):
                 continue
             stopped = attrs.evolve(gate.source, active=False)
             for channel, reception in tuple(gate.receptions.items()):
-                self._update_gate(target, stopped, reception, channel)
+                self._update_gate(target, stopped, reception, channel, gate.stamps[channel])
             target.gates.pop(source_id, None)
+
+    def _expire_receptions(self, target: RenderTarget) -> None:
+        """Stop each channel of a continuous source whose latest reception is older than render.continuous.max_age_s of sim time."""
+        oldest_ns = self.get_clock().now().nanoseconds - round(self._render_conf.CONTINUOUS_MAX_AGE_S.value * 1e9)
+        for source_id, gate in tuple(target.gates.items()):
+            stale = [channel for channel, stamp_ns in gate.stamps.items() if stamp_ns < oldest_ns]
+            if not stale:
+                continue
+            was_admitted = bool(gate.passing)
+            for channel in stale:
+                del gate.stamps[channel]
+                gate.passing.discard(channel)
+                reception = gate.receptions.pop(channel, None)
+                if reception is not None:
+                    self._voice(target, gate.source, reception, channel, admitted=False)
+            if was_admitted and not gate.passing:
+                for channel, reception in gate.receptions.items():
+                    self._voice(target, gate.source, reception, channel, admitted=False)
+            if not gate.receptions and not gate.passing:
+                target.gates.pop(source_id)
 
     def _continuous_channel(self, target: RenderTarget, source: SourceSpec, reception: SoundReception, channel: int, admitted: bool) -> None:
         key = (source.id, channel)
@@ -937,6 +963,7 @@ class RendererNode(ArenaMixinNode):
         output = self._output_target() if self._role is RenderRole.ARRAY else None
         for target in tuple(self._targets.values()):
             self._expire_gates(target)
+            self._expire_receptions(target)
             self._poll_loads(target)
             if self._role is RenderRole.ARRAY:
                 self._publish_stream_activity(target, block_start)
