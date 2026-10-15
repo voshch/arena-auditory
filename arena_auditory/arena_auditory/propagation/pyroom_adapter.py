@@ -68,22 +68,6 @@ class BuiltPyroom:
 
 
 @attrs.frozen
-class RoomImpulseResponse:
-    """One source-to-listener room impulse response, global_delay_samples is the fractional-delay filter latency."""
-
-    samples: NDArray[np.float64]
-    sample_rate_hz: int
-    global_delay_samples: int
-
-    fallback_material_ids: tuple[str, ...]
-
-
-@functools.lru_cache(maxsize=256)
-def _room_polygon(specification: AcousticRoomSpec) -> Polygon:
-    return Polygon(specification.corners_xy)
-
-
-@attrs.frozen
 class DirectArrival:
     """First significant arrival of an RIR, net of the filter delay."""
 
@@ -96,8 +80,27 @@ class DirectArrival:
         return 20.0 * math.log10(max(self.amplitude, 1e-12))
 
 
+@attrs.frozen
+class RoomImpulseResponse:
+    """One source-to-listener room impulse response, global_delay_samples is the fractional-delay filter latency, direct the known direct arrival of a composed response."""
+
+    samples: NDArray[np.float64]
+    sample_rate_hz: int
+    global_delay_samples: int
+
+    fallback_material_ids: tuple[str, ...]
+    direct: DirectArrival | None = None
+
+
+@functools.lru_cache(maxsize=256)
+def _room_polygon(specification: AcousticRoomSpec) -> Polygon:
+    return Polygon(specification.corners_xy)
+
+
 def direct_arrival(rir: RoomImpulseResponse) -> DirectArrival:
-    """Locate the direct arrival and measure its windowed energy amplitude."""
+    """The known direct arrival, else the located one with its windowed energy amplitude."""
+    if rir.direct is not None:
+        return rir.direct
     samples = np.asarray(rir.samples, dtype=np.float64)
     if samples.size == 0 or not np.isfinite(samples).all():
         raise ValueError("RIR contains no finite samples")
@@ -131,12 +134,16 @@ def retarget_rir(
     """Move an RIR's arrivals and 1/r level from one path length to another."""
     to_distance_m = max(to_distance_m, 1e-3)
     shift = int(round((to_distance_m - from_distance_m) / speed_of_sound_mps * rir.sample_rate_hz))
-    samples = np.asarray(rir.samples, dtype=np.float64) * (from_distance_m / to_distance_m)
+    scale = from_distance_m / to_distance_m
+    samples = np.asarray(rir.samples, dtype=np.float64) * scale
     if shift > 0:
         samples = np.concatenate((np.zeros(shift, dtype=np.float64), samples))
     elif shift < 0:
         samples = samples[-shift:]
-    return attrs.evolve(rir, samples=samples)
+    direct = rir.direct
+    if direct is not None:
+        direct = DirectArrival(index=direct.index + shift, delay_s=direct.delay_s + shift / rir.sample_rate_hz, amplitude=direct.amplitude * scale)
+    return attrs.evolve(rir, samples=samples, direct=direct)
 
 
 @attrs.frozen

@@ -221,7 +221,7 @@ class PyroomBackend:
             traversed = coupling.route.zones if coupling.route is not None else zones
             portal_ids = tuple(portal.portal_id for portal in portals)
             portal_positions = tuple((portal.center_xy[0], portal.center_xy[1], 0.5 * portal.height_m) for portal in portals)
-            route_loss_db = float(coupling.applied_portal_loss_db)
+            route_loss_db = float(coupling.applied_portal_loss_db + coupling.applied_corner_loss_db)
             backend = ONE_DOOR if len(portals) == 1 else MULTI_PORTAL
             early_paths = tuple(
                 EarlyPath(

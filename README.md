@@ -453,6 +453,21 @@ segments. Without a connected route, propagation falls back to `level3`, then
 direct path (1/d from the 1 m level, no occlusion, no impulse, so it renders
 dry), whatever the backend and wherever the robot drives.
 
+A route's direct ray runs through the portal points at the free-field level of
+the unfolded route length, less the door or opening loss and a corner loss
+per portal. The corner loss is Maekawa's barrier attenuation (Applied
+Acoustics 1, 1968) in the Kurze and Anderson closed form
+`20 log10(sqrt(2 pi N) / tanh(sqrt(2 pi N)))` (Applied Acoustics 4, 1971)
+without its 5 dB grazing term, with `N = 2 delta / lambda` for the detour
+`delta` of the two route legs at the portal over their chord, at
+`portal.corner_reference_hz` (500 Hz). Every other arrival crosses a portal
+with the power its aperture passes (width times height, a quarter of the
+diffuse intensity or the normal part of the ray's), re-radiated into the half
+space, the diffuse coupling of rooms in Kuttruff's Room Acoustics. Transit
+rooms add reflections up to `portal.early_window_s`. A composed RIR carries
+its direct ray as the direct arrival, so a reception's level and delay are
+the route's even where the reverberant sum behind it is louder.
+
 The result is on every `SoundReception`: `backend`
 (`pyroomacoustics_same_room`, `pyroomacoustics_one_door`,
 `pyroomacoustics_multi_portal`, `level3`, `legacy_distance_occlusion`,

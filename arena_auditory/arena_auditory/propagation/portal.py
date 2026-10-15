@@ -10,7 +10,7 @@ import attrs
 import numpy as np
 from scipy.signal import fftconvolve
 
-from arena_auditory.propagation.pyroom_adapter import PyroomacousticsAdapter, RirUnavailable, RoomImpulseResponse, retarget_rir
+from arena_auditory.propagation.pyroom_adapter import DIRECT_WINDOW_HALF_SAMPLES, PyroomacousticsAdapter, RirUnavailable, RoomImpulseResponse, direct_arrival, retarget_rir
 from arena_auditory.rooms import AcousticPortal, AcousticPortalRoute, AcousticWorldGraph, Position3D
 
 
@@ -21,6 +21,7 @@ class PortalConfig:
     inset_m: float
     door_loss_db: float
     opening_loss_db: float
+    corner_reference_hz: float
     multi_hop_enabled: bool
     max_hops: int
     route_loss_db_per_m: float
@@ -43,6 +44,7 @@ class PortalCouplingResult:
     route: AcousticPortalRoute | None = None
     portal_positions: tuple[Position3D, ...] = ()
     applied_portal_loss_db: float = 0.0
+    applied_corner_loss_db: float = 0.0
 
 
 @attrs.frozen
@@ -60,8 +62,50 @@ class _CachedRoute:
     path_length_m: float
 
 
+@attrs.frozen
+class _SplitRir:
+    direct_start: int
+    direct: np.ndarray = attrs.field(eq=False)
+    reflected: np.ndarray = attrs.field(eq=False)
+
+
 def _segment_length(first: Position3D, second: Position3D) -> float:
     return max(math.dist(first, second), 1e-3)
+
+
+def corner_loss_db(deflection_rad: float, incoming_m: float, outgoing_m: float, *, reference_hz: float, speed_of_sound_mps: float) -> float:
+    """Maekawa attenuation of the detour a route makes at a portal, in the Kurze-Anderson form without its grazing term."""
+    if incoming_m * outgoing_m == 0.0:
+        return 0.0
+    chord = math.sqrt((incoming_m - outgoing_m) ** 2 + 4.0 * incoming_m * outgoing_m * math.cos(0.5 * deflection_rad) ** 2)
+    detour = 4.0 * incoming_m * outgoing_m * math.sin(0.5 * deflection_rad) ** 2 / (incoming_m + outgoing_m + chord)
+    if detour == 0.0:
+        return 0.0
+    root = math.sqrt(4.0 * math.pi * detour * reference_hz / speed_of_sound_mps)
+    return 20.0 * math.log10(root / math.tanh(root))
+
+
+def _deflection_rad(incoming: tuple[float, float], outgoing: tuple[float, float]) -> float:
+    return math.atan2(abs(incoming[0] * outgoing[1] - incoming[1] * outgoing[0]), incoming[0] * outgoing[0] + incoming[1] * outgoing[1])
+
+
+def _split_direct(rir: RoomImpulseResponse, distance_m: float, speed_of_sound_mps: float) -> _SplitRir:
+    """The window around the direct arrival of a room RIR, sought no later than distance_m allows, and the rest of it, both at full length."""
+    samples = np.asarray(rir.samples, dtype=np.float64)
+    latest = int(round(rir.global_delay_samples + distance_m / speed_of_sound_mps * rir.sample_rate_hz)) + DIRECT_WINDOW_HALF_SAMPLES + 1
+    index = direct_arrival(attrs.evolve(rir, samples=samples[:latest])).index
+    start = max(index - DIRECT_WINDOW_HALF_SAMPLES, 0)
+    end = index + DIRECT_WINDOW_HALF_SAMPLES + 1
+    reflected = samples.copy()
+    reflected[start:end] = 0.0
+    return _SplitRir(direct_start=start, direct=samples[start:end].copy(), reflected=reflected)
+
+
+def _through_direct(samples: np.ndarray, split: _SplitRir) -> np.ndarray:
+    """The convolution of samples with the direct window of split, as long as one with the whole RIR."""
+    out = np.zeros(samples.size + split.reflected.size - 1, dtype=np.float64)
+    out[split.direct_start : split.direct_start + samples.size + split.direct.size - 1] = np.convolve(samples, split.direct)
+    return out
 
 
 class MultiPortalRirCoupler:
@@ -199,7 +243,9 @@ class MultiPortalRirCoupler:
             raise ValueError("portal route RIR sample rates differ")
         sample_rate = room_rirs[0].sample_rate_hz
         early_count = int(math.ceil(self._config.early_window_s * sample_rate))
-        segments: list[np.ndarray] = []
+        maximum_count = int(self._config.max_rir_duration_s * sample_rate)
+        segment_lengths = [_segment_length(start, end) for start, end in segment_endpoints]
+        splits: list[_SplitRir] = []
         for index, rir in enumerate(room_rirs):
             samples = np.asarray(rir.samples, dtype=np.float64)
             if samples.size == 0:
@@ -207,29 +253,62 @@ class MultiPortalRirCoupler:
             if index < len(room_rirs) - 1:
                 peak = int(np.argmax(np.abs(samples)))
                 samples = samples[: min(samples.size, max(peak + 1, early_count))]
-            segments.append(samples)
+            splits.append(_split_direct(attrs.evolve(rir, samples=samples), segment_lengths[index], self._adapter.speed_of_sound_mps))
 
-        coupled = segments[0]
-        maximum_count = int(self._config.max_rir_duration_s * sample_rate)
-        for segment in segments[1:]:
-            coupled = fftconvolve(coupled, segment, mode="full")
-            coupled = coupled[:maximum_count]
-        segment_lengths = [_segment_length(start, end) for start, end in segment_endpoints]
-        gap_length = sum(math.dist(before, after) for before, after in endpoints)
-        path_length = sum(segment_lengths) + gap_length
-        coupled *= math.prod(segment_lengths) / path_length
-        gap_samples = int(round(gap_length / self._adapter.speed_of_sound_mps * sample_rate))
-        coupled = np.concatenate((np.zeros(gap_samples, dtype=np.float64), coupled))
+        gaps = [math.dist(before, after) for before, after in endpoints]
+        corner_losses: list[float] = []
+        incidences: list[float] = []
+        for index, portal in enumerate(route.portals):
+            (start, before), (after, end) = segment_endpoints[index], segment_endpoints[index + 1]
+            incoming = (before[0] - start[0], before[1] - start[1])
+            outgoing = (end[0] - after[0], end[1] - after[1])
+            incoming_m = math.hypot(*incoming)
+            corner_losses.append(
+                corner_loss_db(
+                    _deflection_rad(incoming, outgoing),
+                    incoming_m,
+                    math.hypot(*outgoing),
+                    reference_hz=self._config.corner_reference_hz,
+                    speed_of_sound_mps=self._adapter.speed_of_sound_mps,
+                )
+            )
+            normal = (portal.start[1] - portal.end[1], portal.end[0] - portal.start[0])
+            incidences.append(abs(incoming[0] * normal[0] + incoming[1] * normal[1]) / (incoming_m * math.hypot(*normal)) if incoming_m > 0.0 else 1.0)
+
+        rays = [(_through_direct(np.ones(1, dtype=np.float64), splits[0]), segment_lengths[0])]
+        diffuse = splits[0].reflected
+        for index, (portal, split) in enumerate(zip(route.portals, splits[1:], strict=True)):
+            length = segment_lengths[index + 1]
+            area = math.dist(portal.start, portal.end) * portal.height_m
+            diffuse_strength = math.sqrt(area / (8.0 * math.pi))
+            emitted = diffuse * diffuse_strength + sum(ray for ray, _ in rays) * math.sqrt(incidences[index] * area / (2.0 * math.pi))
+            corner_gain = 10.0 ** (-corner_losses[index] / 20.0)
+            rays = [
+                *((_through_direct(ray, split)[:maximum_count] * (unfolded * length / (unfolded + gaps[index] + length)) * corner_gain, unfolded + gaps[index] + length) for ray, unfolded in rays),
+                (_through_direct(diffuse, split)[:maximum_count] * diffuse_strength, length),
+            ]
+            diffuse = fftconvolve(emitted, split.reflected, mode="full")[:maximum_count]
+
+        path_length = sum(segment_lengths) + sum(gaps)
+        leading = np.zeros(int(round(sum(gaps) / self._adapter.speed_of_sound_mps * sample_rate)), dtype=np.float64)
         applied_loss = sum((portal.loss_db if portal.loss_db is not None else (self._config.opening_loss_db if portal.portal_kind == "opening" else self._config.door_loss_db)) for portal in route.portals)
-        coupled *= 10.0 ** (-applied_loss / 20.0)
-        coupled = np.asarray(coupled[:maximum_count], dtype=np.float64)
+        gain = 10.0 ** (-applied_loss / 20.0)
+        global_delay = sum(rir.global_delay_samples for rir in room_rirs)
+        direct = RoomImpulseResponse(
+            samples=np.concatenate((leading, rays[0][0]))[:maximum_count] * gain,
+            sample_rate_hz=sample_rate,
+            global_delay_samples=global_delay,
+            fallback_material_ids=(),
+        )
+        coupled = np.concatenate((leading, diffuse + sum(ray for ray, _ in rays)))[:maximum_count] * gain
         fallback_ids = tuple(dict.fromkeys(material_id for rir in room_rirs for material_id in rir.fallback_material_ids))
         result = PortalCouplingResult(
             rir=RoomImpulseResponse(
                 samples=coupled,
                 sample_rate_hz=sample_rate,
-                global_delay_samples=sum(rir.global_delay_samples for rir in room_rirs),
+                global_delay_samples=global_delay,
                 fallback_material_ids=fallback_ids,
+                direct=direct_arrival(direct),
             ),
             portal=route.portals[0],
             source_portal_position=endpoints[0][0],
@@ -237,6 +316,7 @@ class MultiPortalRirCoupler:
             route=route,
             portal_positions=tuple(flat_positions),
             applied_portal_loss_db=applied_loss,
+            applied_corner_loss_db=sum(corner_losses),
         )
         self._route_cache[route_key] = _CachedRoute(
             result=result,

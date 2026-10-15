@@ -93,6 +93,7 @@ class PortalGroup(ParamGroup):
     INSET_M = Param[float]("portal.inset_m", 0.03, parse=positive)
     DOOR_LOSS_DB = Param[float]("portal.door_loss_db", 3.0, parse=non_negative)
     OPENING_LOSS_DB = Param[float]("portal.opening_loss_db", 0.5, parse=non_negative)
+    CORNER_REFERENCE_HZ = Param[float]("portal.corner_reference_hz", 500.0, parse=positive)
     OPENINGS_ENABLED = Param[bool]("portal.openings.enabled", True)
     MIN_OPENING_WIDTH_M = Param[float]("portal.min_opening_width_m", 0.2, parse=positive)
     MULTI_HOP_ENABLED = Param[bool]("portal.multi_hop.enabled", True, description="Allow pyroomacoustics RIR rendering across multi-hop door and opening portal routes.")
