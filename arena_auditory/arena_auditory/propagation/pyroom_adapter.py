@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any, cast
 import attrs
 import numpy as np
 from numpy.typing import NDArray
-from shapely.geometry import Point, Polygon
+from shapely.geometry import LineString, Point, Polygon
 from shapely.ops import nearest_points
 
 from arena_auditory.materials import AcousticMaterial, AcousticMaterialCatalog
@@ -28,6 +28,7 @@ Position3D = tuple[float, float, float]
 DIRECT_WINDOW_HALF_SAMPLES = 40
 DIRECT_ARRIVAL_RELATIVE_THRESHOLD = 0.25
 MAIN_LOBE_SEARCH_SAMPLES = 3
+MAIN_LOBE_HALF_SAMPLES = 3
 AIR_ABSORPTION = True
 RAY_TRACING = False
 RANDOMIZED_ISM = False
@@ -122,6 +123,16 @@ def direct_arrival(rir: RoomImpulseResponse) -> DirectArrival:
         delay_s=(index + offset - rir.global_delay_samples) / float(rir.sample_rate_hz),
         amplitude=float(np.sqrt(np.sum(window**2))),
     )
+
+
+def arrival_at(rir: RoomImpulseResponse, delay_s: float) -> DirectArrival:
+    """The direct arrival at a known delay, its amplitude from the main lobe energy over that of a unit fractional-delay sinc."""
+    samples = np.asarray(rir.samples, dtype=np.float64)
+    position = rir.global_delay_samples + delay_s * rir.sample_rate_hz
+    index = min(max(int(round(position)), 0), samples.size - 1)
+    lobe = np.arange(max(index - MAIN_LOBE_HALF_SAMPLES, 0), min(index + MAIN_LOBE_HALF_SAMPLES + 1, samples.size))
+    share = float(np.sum(np.sinc(lobe - position) ** 2))
+    return DirectArrival(index=index, delay_s=delay_s, amplitude=float(np.sqrt(np.sum(samples[lobe] ** 2) / share)))
 
 
 def retarget_rir(
@@ -457,6 +468,7 @@ class PyroomacousticsAdapter:
                 return [outcome for listener in listeners for outcome in self._run(built, source, (listener,))]
             return [RirUnavailable(f"pyroomacoustics failed in {zone_name!r}: {exc}")]
         fractional_delay_length = int(_load_pyroomacoustics().constants.get("frac_delay_length"))
+        polygon = _room_polygon(built.specification)
         outcomes: list[RoomImpulseResponse | RirUnavailable] = []
         for microphone in range(len(listeners)):
             if not room.rir[microphone]:
@@ -466,14 +478,16 @@ class PyroomacousticsAdapter:
             if samples.size == 0 or not np.isfinite(samples).all():
                 outcomes.append(RirUnavailable(f"pyroomacoustics produced a non-finite RIR in {zone_name!r}"))
                 continue
-            outcomes.append(
-                RoomImpulseResponse(
-                    samples=samples,
-                    sample_rate_hz=self._config.sample_rate_hz,
-                    global_delay_samples=fractional_delay_length // 2,
-                    fallback_material_ids=built.fallback_material_ids,
-                )
+            rir = RoomImpulseResponse(
+                samples=samples,
+                sample_rate_hz=self._config.sample_rate_hz,
+                global_delay_samples=fractional_delay_length // 2,
+                fallback_material_ids=built.fallback_material_ids,
             )
+            listener = listeners[microphone]
+            if polygon.covers(LineString((source[:2], listener[:2]))):
+                rir = attrs.evolve(rir, direct=arrival_at(rir, math.dist(source, listener) / self.speed_of_sound_mps))
+            outcomes.append(rir)
         return outcomes
 
     def _built_room(self, specification: AcousticRoomSpec) -> BuiltPyroom:

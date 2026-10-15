@@ -450,9 +450,13 @@ On world load, each door joins the two zones the world semantics `connects`
 through it (stated in `kg.yaml` or derived from geometry), a door with
 fewer than two zones is reported unpaired, and Arena derives an opening portal where two adjacent rooms agree that a shared
 boundary span is open. Each authored zone is one pyroomacoustics room.
-Same-zone sounds use one room-local impulse response. Cross-zone sounds follow
-a door or opening route up to `portal.max_hops`, composed from room-local
-segments. Without a connected route, propagation falls back to `level3`, then
+Same-zone sounds use one room-local impulse response. Its direct arrival sits
+at the geometric delay, its level the main lobe energy over that of a unit
+fractional-delay sinc, so floor, ceiling and wall images arriving with it on a
+symmetric axis stay out of the direct level. Where a room corner hides the
+direct path, the first significant arrival of the impulse stands in for it.
+Cross-zone sounds follow a door or opening route up to `portal.max_hops`,
+composed from room-local segments. Without a connected route, propagation falls back to `level3`, then
 `legacy`, and records the reason. A robot hears its own noise sources at every
 `robot:<r>` and `array:<r>:<mic>` listener it owns through a fixed free-field
 direct path (1/d from the 1 m level, no occlusion, no impulse, so it renders
