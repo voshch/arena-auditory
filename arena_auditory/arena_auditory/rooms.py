@@ -79,6 +79,28 @@ class AcousticRoomSpec:
     def boundary_material_ids(self) -> tuple[str, ...]:
         return tuple(segment.material_id for segment in self.boundary)
 
+    def opened(self, portals: tuple[AcousticPortal, ...]) -> AcousticRoomSpec:
+        """This room with the boundary spans of portals open."""
+        spans = [LineString((portal.start, portal.end)) for portal in portals]
+        boundary: list[AcousticBoundarySpec] = []
+        for segment in self.boundary:
+            cuts = {0.0, 1.0}
+            for span in spans:
+                for point in span.coords:
+                    if _point_on_edge(point, segment.start, segment.end, GEOMETRY_TOLERANCE_M):
+                        cuts.add(min(max(_projection_parameter(point, segment.start, segment.end), 0.0), 1.0))
+            ordered = sorted(cuts)
+            for first, second in zip(ordered, ordered[1:], strict=False):
+                if second - first <= 1e-9:
+                    continue
+                start = _interpolate(segment.start, segment.end, first)
+                end = _interpolate(segment.start, segment.end, second)
+                if any(span.distance(Point(start)) <= GEOMETRY_TOLERANCE_M and span.distance(Point(end)) <= GEOMETRY_TOLERANCE_M for span in spans):
+                    boundary.append(AcousticBoundarySpec(start=start, end=end, material_id=OPENING_MATERIAL_ID, kind="opening"))
+                else:
+                    boundary.append(attrs.evolve(segment, start=start, end=end))
+        return attrs.evolve(self, boundary=tuple(boundary))
+
 
 def _is_finite_point(point: Point2D) -> bool:
     return math.isfinite(point[0]) and math.isfinite(point[1])

@@ -469,7 +469,10 @@ Acoustics 1, 1968) in the Kurze and Anderson closed form
 `20 log10(sqrt(2 pi N) / tanh(sqrt(2 pi N)))` (Applied Acoustics 4, 1971)
 without its 5 dB grazing term, with `N = 2 delta / lambda` for the detour
 `delta` of the two route legs at the portal over their chord, at
-`portal.corner_reference_hz` (500 Hz). Every other arrival crosses a portal
+`portal.corner_reference_hz` (500 Hz). A segment room leaves the spans of
+the route's portals open, so a portal point samples the incident field, the
+field a door's transmission loss refers to, and not its reflection off a door
+leaf. Every other arrival crosses a portal
 with the power its aperture passes (width times height, a quarter of the
 diffuse intensity or the normal part of the ray's), re-radiated into the half
 space, the diffuse coupling of rooms in Kuttruff's Room Acoustics. Transit

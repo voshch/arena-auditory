@@ -237,7 +237,7 @@ class MultiPortalRirCoupler:
             *((endpoints[index - 1][1], endpoints[index][0]) for index in range(1, len(endpoints))),
             (endpoints[-1][1], listener_position_m),
         ]
-        room_rirs = [self._cached_room_rir(zone_name, start, end) for zone_name, (start, end) in zip(route.zones, segment_endpoints, strict=True)]
+        room_rirs = [self._cached_room_rir(zone_name, start, end, route.portals[max(index - 1, 0) : index + 1]) for index, (zone_name, (start, end)) in enumerate(zip(route.zones, segment_endpoints, strict=True))]
         sample_rates = {rir.sample_rate_hz for rir in room_rirs}
         if len(sample_rates) != 1:
             raise ValueError("portal route RIR sample rates differ")
@@ -351,6 +351,7 @@ class MultiPortalRirCoupler:
         zone_name: str,
         source: Position3D,
         listener: Position3D,
+        portals: tuple[AcousticPortal, ...],
     ) -> RoomImpulseResponse:
         quantization = self._config.quantization_m
 
@@ -360,6 +361,7 @@ class MultiPortalRirCoupler:
         key = (
             self._world_name,
             zone_name,
+            tuple(portal.portal_id for portal in portals),
             quantize(source),
             quantize(listener),
         )
@@ -378,7 +380,7 @@ class MultiPortalRirCoupler:
         if room is None:
             raise RirUnavailable(f"no room specification for zone {zone_name!r}")
         rir = self._adapter.compute_rir(
-            room,
+            room.opened(portals),
             source_position_m=source,
             listener_position_m=listener,
         )

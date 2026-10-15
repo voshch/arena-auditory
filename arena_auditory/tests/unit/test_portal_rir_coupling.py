@@ -360,3 +360,34 @@ def test_f_shape_victim_behind_two_corners_at_12_m_is_quieter_than_behind_one_at
     assert near <= _free_field_db(graph, ("zone_02", "zone_03"), portals[:1], near_victim, near_robot)
     assert far <= _free_field_db(graph, ("zone_02", "zone_03", "zone_04"), portals, far_victim, far_robot)
     assert far < near
+
+
+def _doorway_graph(kind: str, material_id: str) -> tuple[AcousticWorldGraph, AcousticPortal]:
+    span = ((6.0, 1.5), (6.0, 2.5))
+    rooms = []
+    for name, x_min, x_max in (("a", 0.0, 6.0), ("b", 6.0, 12.0)):
+        corners = ((x_min, 0.0), (x_max, 0.0), (x_max, 4.0), (x_min, 4.0))
+        boundary: list[AcousticBoundarySpec] = []
+        for index, start in enumerate(corners):
+            end = corners[(index + 1) % 4]
+            cuts = sorted({start, end, *(point for point in span if _on_edge(point, start, end))}, key=lambda point: math.dist(start, point))
+            for first, second in zip(cuts, cuts[1:], strict=False):
+                doorway = _on_edge((0.5 * (first[0] + second[0]), 0.5 * (first[1] + second[1])), *span)
+                boundary.append(AcousticBoundarySpec(start=first, end=second, material_id=material_id if doorway else "Acoustic_Default_Wall", kind=kind if doorway else "wall"))
+        rooms.append(AcousticRoomSpec(zone_name=name, boundary=tuple(boundary), floor_material_id="Acoustic_Default_Floor", ceiling_material_id="Acoustic_Default_Ceiling", ceiling_height_m=3.0))
+    portal = AcousticPortal(portal_id=f"{kind}:ab", door_name="ab" if kind == "door" else "", zone_a="a", zone_b="b", start=span[0], end=span[1], height_m=2.1, material_id=material_id, portal_kind=kind)
+    return _graph(tuple(rooms), (portal,)), portal
+
+
+@pytest.mark.parametrize(("kind", "material_id"), [("door", "Acoustic_Default_Wall"), ("door", "Oak_Planks"), ("opening", "Acoustic_Open")])
+@pytest.mark.parametrize(("source", "listener"), [((2.0, 2.0, EAR_HEIGHT_M), (10.0, 2.0, EAR_HEIGHT_M)), ((3.0, 1.0, EAR_HEIGHT_M), (9.0, 3.0, EAR_HEIGHT_M)), ((5.0, 2.0, EAR_HEIGHT_M), (7.0, 2.0, EAR_HEIGHT_M))])
+def test_door_crossing_reads_free_field_less_the_portal_loss_like_an_opening(kind: str, material_id: str, source: Position3D, listener: Position3D) -> None:
+    graph, portal = _doorway_graph(kind, material_id)
+    coupler = MultiPortalRirCoupler(_reverberant_adapter(), graph, world_name=f"doorway_{kind}_{material_id}", config=_portal_config())
+
+    result = coupler.compute(source_zone="a", listener_zone="b", source_position_m=source, listener_position_m=listener)
+
+    expected = _free_field_db(graph, ("a", "b"), (portal,), source, listener) - result.applied_portal_loss_db - result.applied_corner_loss_db
+    excess = direct_arrival(result.rir).gain_db - expected
+    print(f"\n{kind} {material_id} {source[:2]}->{listener[:2]}: {excess:+.2f} dB against free field less the portal and corner loss")
+    assert -1.0 < excess <= 0.0
