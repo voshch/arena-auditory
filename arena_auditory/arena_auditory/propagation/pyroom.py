@@ -213,6 +213,8 @@ class PyroomBackend:
         source, position = emission.position, listener.position
         occluded = coupling is None and scene.occupancy is not None and scene.occupancy.occluded(source, position)
         received = emission.level_db + gain_db - (self.config.occlusion_db if occluded else 0.0)
+        energy_db = 10.0 * math.log10(max(float(np.sum(np.asarray(rir.samples, dtype=np.float64) ** 2)), 1e-24))
+        audible = received - gain_db + energy_db >= self.config.threshold_db
 
         portal_ids: tuple[str, ...] = ()
         traversed: tuple[str, ...] = (zones[0],)
@@ -256,7 +258,7 @@ class PyroomBackend:
             received_level_db=float(received),
             threshold_db=self.config.threshold_db,
             direct_delay_s=float(delay_s),
-            audible=received >= self.config.threshold_db,
+            audible=audible,
             occluded=occluded,
             backend=backend,
             source_zone=zones[0],

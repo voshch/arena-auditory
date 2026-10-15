@@ -478,7 +478,11 @@ diffuse intensity or the normal part of the ray's), re-radiated into the half
 space, the diffuse coupling of rooms in Kuttruff's Room Acoustics. Transit
 rooms add reflections up to `portal.early_window_s`. A composed RIR carries
 its direct ray as the direct arrival, so a reception's level and delay are
-the route's even where the reverberant sum behind it is louder.
+the route's even where the reverberant sum behind it is louder. A reception is
+audible when the energy of its whole impulse response, which the renderer
+plays at `render.rir.enabled`, reaches `propagation.threshold_db`, so a source
+whose direct ray falls below the threshold behind a corner still renders its
+reverberant field.
 
 The result is on every `SoundReception`: `backend`
 (`pyroomacoustics_same_room`, `pyroomacoustics_one_door`,
