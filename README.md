@@ -34,6 +34,7 @@ arena_auditory/                 this repository
 |   |   |-- sources/            source models (wav, wav_loop, drivetrain), pedestrian events
 |   |   |-- render/             block renderer, DSP, monitor, workstation output
 |   |   |-- dataset/            acoustics recording export and capture wait
+|   |   |-- mcp.py              the acoustics MCP domain
 |   |   `-- *_node.py, bus_node.py, offline_render.py, acoustic_audit.py, microphone_diagnostic.py
 |   |-- config/                 acoustic_materials.yaml
 |   |-- launch/                 arena_auditory.launch.py
@@ -576,15 +577,33 @@ arena launch sim:=gazebo robot:=jackal world:=acoustics_bend_narrow_O \
 The belief grid, the policy, the front-ends, their parameters and the Nav2
 overlay are documented in `arena_hearing`.
 
+## MCP domain
+
+`arena_auditory.mcp` contributes the `acoustics` domain to the Arena MCP
+server: the listener registry, spawning and removing runtime microphones,
+propagated receptions per listener, emitted sound events, room impulse
+summaries and short WAV captures of a robot's audio streams.
+`python3 -m arena_mcp ls acoustics` lists its tools.
+
+Every tool takes `env_id`, which may be omitted while one env runs, and the
+audio capture also `robot`. Names resolve below the env's task generator node
+as in [Topics](#topics). The event tools subscribe on their first call and wait
+up to `window_s` while they collect, later calls answer from what arrived since.
+A microphone is propagated only while it is the selected `listener.id`, so
+`acoustics_spawn_microphone` selects the new microphone unless told not to.
+Sound sources are spawned by the `entities` domain.
+
 ## Tests
 
 ```bash
 python3 -m pytest arena_auditory/tests/unit -q
 python3 -m pytest arena_auditory/tests/ros/test_auditory_round_trip.py -q
+python3 -m pytest arena_auditory/tests/mcp -q
 ```
 
 The ROS round trip publishes a speech `SoundEvent`, expects a reception for
-`robot:<r>`, the republished `<r>/heard_sound` and its text marker.
+`robot:<r>`, the republished `<r>/heard_sound` and its text marker. The MCP
+tests call the acoustics tools against a live `sound_propagation_node`.
 
 ## Configuration
 

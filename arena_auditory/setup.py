@@ -44,6 +44,9 @@ setup(
             'microphone_diagnostic = arena_auditory.microphone_diagnostic:main',
             'export_acoustics_recording = arena_auditory.dataset.export_recording:main',
             'wait_acoustics_capture = arena_auditory.dataset.wait_capture:main',
-        ]
+        ],
+        'arena_mcp.domains': [
+            'acoustics = arena_auditory.mcp:domain',
+        ],
     },
 )

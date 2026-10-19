@@ -16,7 +16,7 @@ dependencies = [
     "shapely",
     "sounddevice>=0.5.5",
 ]
-dynamic = ["description", "license", "maintainers", "scripts"]
+dynamic = ["description", "license", "maintainers", "scripts", "entry-points"]
 
 [project.optional-dependencies]
 test = ["pytest>=7"]

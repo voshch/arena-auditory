@@ -19,6 +19,7 @@
 
   <exec_depend>ament_index_python</exec_depend>
   <exec_depend>arena_auditory_viz</exec_depend>
+  <exec_depend>arena_mcp</exec_depend>
   <exec_depend>arena_people_msgs</exec_depend>
   <exec_depend>arena_rclpy_mixins</exec_depend>
   <exec_depend>arena_runtime</exec_depend>
