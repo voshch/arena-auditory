@@ -72,9 +72,9 @@ class HumanEmitterNode(ArenaMixinNode):
         self._marker_publisher: LazyPublisher[MarkerArray] = LazyPublisher(self.create_publisher(MarkerArray, env_topic(env_ns, PEDESTRIAN_MARKERS_EXTRA), reliable(10)))
         self.create_subscription(Pedestrians, env_topic(env_ns, ARENA_PEDS), self._on_pedestrians, 10)
 
-    def destroy_node(self) -> bool:
+    def destroy_node(self) -> None:
         self._tracker.destroy()
-        return super().destroy_node()
+        super().destroy_node()
 
     def _on_world_ready(self, world: AcousticWorld) -> None:
         self.get_logger().info(f"footstep floor materials from acoustic world {world.name!r}, {len(world.scene.zones)} zones")
@@ -158,7 +158,7 @@ class HumanEmitterNode(ArenaMixinNode):
         fill.lifetime = MARKER_LIFETIME
         fill.color = ColorRGBA(r=r, g=g, b=b, a=0.3)
         for left, right in itertools.pairwise(arc):
-            fill.points.extend([apex, left, right])
+            fill.points.extend([apex, left, right])  # pyright: ignore[reportAttributeAccessIssue]
 
         outline = Marker()
         outline.header = fill.header

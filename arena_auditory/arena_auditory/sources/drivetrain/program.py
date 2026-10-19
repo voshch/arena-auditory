@@ -15,7 +15,7 @@ from arena_auditory.params import MotorGroup
 from arena_auditory.shared import SourceSpec
 from arena_auditory.sources import tuning_of
 from arena_auditory.sources.drivetrain.spec import JACKAL, DrivetrainSpec
-from arena_auditory.sources.drivetrain.voice import DrivetrainVoice
+from arena_auditory.sources.drivetrain.voice import DrivetrainVoice, RenderOptions
 from arena_auditory.sources.drivetrain.voice import prewarm as prewarm_field
 
 if typing.TYPE_CHECKING:
@@ -166,7 +166,7 @@ class DrivetrainProgram:
             right_speed = target_right + (self._current_right - target_right) * decay
         self._current_left = float(left_speed[-1])
         self._current_right = float(right_speed[-1])
-        render_options = {
+        render_options: RenderOptions = {
             "frequency_scale": frequency_scale,
             "tonal_gain_db": tonal_gain_db,
             "broadband_gain_db": broadband_gain_db,

@@ -78,7 +78,7 @@ MIC_COLORS = {
 }
 DEFAULT_MIC_COLOR = ColorRGBA(r=0.12, g=0.95, b=0.45, a=0.85)
 
-LIVE_LEVEL_PARAMS: tuple[Param[object], ...] = (
+LIVE_LEVEL_PARAMS: tuple[Param[float] | Param[int], ...] = (
     PropagationGroup.THRESHOLD_DB,
     PropagationGroup.MIN_DISTANCE_M,
     PropagationGroup.OCCLUSION_DB,
@@ -186,12 +186,12 @@ class SoundPropagationNode(ArenaMixinNode):
         self._on_listener_selected(self._listener_id.value)
         self._publish_registry()
 
-    def destroy_node(self) -> bool:
+    def destroy_node(self) -> None:
         self._tracker.destroy()
         self._tf_listener.close()
-        return super().destroy_node()
+        super().destroy_node()
 
-    def _retune(self, param: Param[object], value: object) -> bool:
+    def _retune(self, param: Param[float] | Param[int], value: object) -> bool:
         parsed = param.parse(value) if param.parse is not None else value
         self._propagator.config = attrs.evolve(self._propagator.config, **{param.field: parsed})
         self._continuous_cache.clear()

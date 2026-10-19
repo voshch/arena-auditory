@@ -18,7 +18,7 @@ lifted out on its own.
 
 import math
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, TypedDict, Unpack
 
 import numpy as np
 from numpy.typing import ArrayLike, DTypeLike, NDArray
@@ -45,10 +45,17 @@ _MOD = ORDER_DEN * Q32  # phase modulus; see the note on exactness below
 _CHUNK = 4096  # internal subdivision, bounds peak memory only
 
 
+class RenderOptions(TypedDict, total=False):
+    frequency_scale: float
+    tonal_gain_db: float
+    broadband_gain_db: float
+    speed_exponent: float | None
+
+
 # ----------------------------------------------------------------------------
 # transfer H(f): a linear-phase FIR, designed here so scipy is not needed
 # ----------------------------------------------------------------------------
-def _firwin2(numtaps: int, freq: ArrayLike, gain: ArrayLike) -> NDArray[np.float64]:
+def _firwin2(numtaps: int, freq: NDArray[np.float64], gain: NDArray[np.float64]) -> NDArray[np.float64]:
     """Frequency-sampling FIR design. Matches scipy.signal.firwin2 to ~1e-16.
 
     `freq` is normalised to Nyquist = 1 and must start at 0 and end at 1.
@@ -362,7 +369,7 @@ class DrivetrainVoice:
         self.frames_rendered += n
         return out * self.gain
 
-    def render_seconds(self, v: ArrayLike, seconds: float, tau: ArrayLike = 0.0, **render_options: float | None) -> NDArray[np.float64]:
+    def render_seconds(self, v: ArrayLike, seconds: float, tau: ArrayLike = 0.0, **render_options: Unpack[RenderOptions]) -> NDArray[np.float64]:
         """Render `seconds` worth of audio, carrying the fractional remainder.
 
         Use this when the control loop ticks at a rate that is not a divisor of

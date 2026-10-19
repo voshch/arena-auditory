@@ -6,7 +6,6 @@ import heapq
 import itertools
 import math
 import re
-from collections.abc import Hashable
 from typing import TYPE_CHECKING, Literal
 
 import attrs
@@ -86,9 +85,9 @@ class AcousticRoomSpec:
         for segment in self.boundary:
             cuts = {0.0, 1.0}
             for span in spans:
-                for point in span.coords:
-                    if _point_on_edge(point, segment.start, segment.end, GEOMETRY_TOLERANCE_M):
-                        cuts.add(min(max(_projection_parameter(point, segment.start, segment.end), 0.0), 1.0))
+                for x, y in span.coords:
+                    if _point_on_edge((x, y), segment.start, segment.end, GEOMETRY_TOLERANCE_M):
+                        cuts.add(min(max(_projection_parameter((x, y), segment.start, segment.end), 0.0), 1.0))
             ordered = sorted(cuts)
             for first, second in zip(ordered, ordered[1:], strict=False):
                 if second - first <= 1e-9:
@@ -453,7 +452,7 @@ class AcousticRoomSpecBuilder:
     def _from_zone(self, zone: Zone, level_walls: list[_SourceSegment], level_doors: list[_SourceSegment]) -> AcousticRoomSpec:
         polygon = _normalize_polygon(zone)
 
-        corners = list(polygon.exterior.coords)[:-1]
+        corners = [(x, y) for x, y in list(polygon.exterior.coords)[:-1]]
 
         walls = _segments_near(level_walls, polygon)
         doors = _segments_near(level_doors, polygon)
@@ -694,8 +693,9 @@ class AcousticWorldGraph:
                                 if line.geom_type != "LineString" or line.length < config.min_opening_width_m:
                                     continue
                                 coordinates = list(line.coords)
-                                start = tuple(map(float, coordinates[0]))
-                                end = tuple(map(float, coordinates[-1]))
+                                (start_x, start_y), (end_x, end_y) = coordinates[0], coordinates[-1]
+                                start = (float(start_x), float(start_y))
+                                end = (float(end_x), float(end_y))
                                 ordered_zones = tuple(sorted((zone_a, zone_b)))
                                 endpoints = sorted((start, end))
                                 geometry_key = tuple(round(value, 4) for point in endpoints for value in point)
@@ -772,7 +772,7 @@ class AcousticWorldGraph:
 
         # (estimated total cost, sequence, accumulated cost, zone, anchor,
         #  zones, portals)
-        queue: list[tuple[Hashable, ...]] = []
+        queue: list[tuple[float, int, float, str, Point2D, tuple[str, ...], tuple[AcousticPortal, ...]]] = []
         sequence = itertools.count()
         heapq.heappush(
             queue,
@@ -829,7 +829,7 @@ class AcousticWorldGraph:
 
     def connected_components(self) -> tuple[tuple[str, ...], ...]:
         remaining = {room.zone_name for room in self.rooms}
-        adjacency = {name: set() for name in remaining}
+        adjacency: dict[str, set[str]] = {name: set() for name in remaining}
         for portal in self.portals:
             adjacency.setdefault(portal.zone_a, set()).add(portal.zone_b)
             adjacency.setdefault(portal.zone_b, set()).add(portal.zone_a)
@@ -843,7 +843,7 @@ class AcousticWorldGraph:
                 if zone in component:
                     continue
                 component.add(zone)
-                stack.extend(adjacency.get(zone, ()) - component)
+                stack.extend(adjacency.get(zone, set()) - component)
             remaining -= component
             components.append(tuple(sorted(component)))
         return tuple(components)

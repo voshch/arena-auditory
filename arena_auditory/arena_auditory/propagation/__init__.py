@@ -257,7 +257,12 @@ class BackendUnavailable(Exception):
 
 class PropagationBackend(typing.Protocol):
     name: typing.ClassVar[str]
-    config: PropagationConfig
+
+    @property
+    def config(self) -> PropagationConfig: ...
+
+    @config.setter
+    def config(self, config: PropagationConfig) -> None: ...
 
     def propagate(self, emission: Emission, listener: Listener, scene: PropagationScene) -> Reception: ...
 
@@ -297,7 +302,7 @@ def _pyroomacoustics(config: PropagationConfig, materials: AcousticMaterialCatal
 class Propagator:
     """Self path for a robot's own sources, else requested backend first, then level3, then legacy, recording the fallback reason."""
 
-    def __init__(self, config: PropagationConfig, materials: AcousticMaterialCatalog, *, warn: Callable[[str], None] | None = None) -> None:
+    def __init__(self, config: PropagationConfig, materials: AcousticMaterialCatalog, *, warn: Callable[[str], object] | None = None) -> None:
         self._config = config
         self._warn = warn or (lambda _message: None)
         self.impulses = RirCache(config.rir.cache_size)

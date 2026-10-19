@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import itertools
 import math
@@ -76,9 +77,9 @@ class RobotEmitterNode(ArenaMixinNode):
         follow_world_sounds(self, self._library, self._loader)
         self.create_timer(self._drivetrain.PERIOD_S.value, self._publish)
 
-    def destroy_node(self) -> bool:
+    def destroy_node(self) -> None:
         self._loader.shutdown(wait=False, cancel_futures=True)
-        return super().destroy_node()
+        super().destroy_node()
 
     def _on_episode(self, msg: EpisodeRecord) -> None:
         self._episode_seed = int(msg.seed)
@@ -93,7 +94,7 @@ class RobotEmitterNode(ArenaMixinNode):
             if separation is None:
                 separation = max(2.0 * self._drivetrain.ANGULAR_SCALE_M.value, MIN_WHEEL_SEPARATION_M)
                 self.get_logger().warning(f"robot {binding.name!r}: no wheel separation for model {binding.model!r}, using {separation:.5f} m")
-            subscriptions = [self.create_subscription(Odometry, topic, lambda odom, name=binding.name: self._on_odom(name, odom), best_effort(10)) for topic in binding.odom_topics]
+            subscriptions = [self.create_subscription(Odometry, topic, functools.partial(self._on_odom, binding.name), best_effort(10)) for topic in binding.odom_topics]
             self._robots[binding.name] = _Robot(
                 binding=binding,
                 wheel_separation_m=separation,
@@ -208,7 +209,7 @@ class RobotEmitterNode(ArenaMixinNode):
         fill.color = ColorRGBA(r=r, g=g, b=b, a=0.28)
         fill.lifetime = Duration(sec=lifetime_ns // NS_PER_S, nanosec=lifetime_ns % NS_PER_S)
         for left, right in itertools.pairwise(arc):
-            fill.points.extend([apex, left, right])
+            fill.points.extend([apex, left, right])  # pyright: ignore[reportAttributeAccessIssue]
 
         outline = Marker()
         outline.header = fill.header
@@ -236,7 +237,7 @@ class RobotEmitterNode(ArenaMixinNode):
             marker.ns = namespace
             marker.id = base_id + index
             marker.action = Marker.DELETE
-            markers.markers.append(marker)
+            markers.markers.append(marker)  # pyright: ignore[reportAttributeAccessIssue]
         robot.marker_publisher.publish(lambda: markers)
 
 

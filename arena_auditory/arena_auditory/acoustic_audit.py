@@ -10,7 +10,7 @@ import attrs
 import numpy as np
 import yaml
 from ament_index_python.packages import get_package_share_directory
-from arena_rclpy_mixins.param_groups import configure
+from arena_rclpy_mixins.param_groups import PerRole, configure
 from arena_simulation_setup.kg import Scene
 from arena_simulation_setup.tree.World import WorldIdentifier, WorldView
 from PIL import Image
@@ -154,7 +154,10 @@ def plot_room(args: argparse.Namespace) -> int:
     source = tuple(args.source)
     listener = tuple(args.listener)
     rir = PyroomacousticsAdapter(default_catalog(), rir_config).compute_rir(room, source_position_m=source, listener_position_m=listener)
-    dashboard = AcousticPlotDashboard(energy_bin_ms=VizGroup.PLOT_ENERGY_BIN_MS.default, early_window_s=VizGroup.PLOT_EARLY_WINDOW_S.default, interactive=False)
+    energy_bin_ms = VizGroup.PLOT_ENERGY_BIN_MS.default
+    early_window_s = VizGroup.PLOT_EARLY_WINDOW_S.default
+    assert not isinstance(energy_bin_ms, PerRole) and not isinstance(early_window_s, PerRole)
+    dashboard = AcousticPlotDashboard(energy_bin_ms=energy_bin_ms, early_window_s=early_window_s, interactive=False)
     dashboard.update(
         AcousticPlotSnapshot.from_rir(
             rir,

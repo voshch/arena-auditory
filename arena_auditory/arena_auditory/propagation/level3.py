@@ -139,7 +139,7 @@ class Level3Propagation:
             ray = shapely.LineString([(image[0], image[1]), (listener[0], listener[1])])
             intersection = ray.intersection(wall.geometry)
 
-            if intersection.is_empty or intersection.geom_type != "Point":
+            if intersection.is_empty or not isinstance(intersection, shapely.Point):
                 continue
 
             reflection = (float(intersection.x), float(intersection.y), source[2])

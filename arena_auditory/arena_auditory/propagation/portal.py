@@ -323,7 +323,8 @@ class MultiPortalRirCoupler:
         quantization = self._config.quantization_m
 
         def quantize(position: Position3D) -> tuple[int, int, int]:
-            return tuple(int(round(value / quantization)) for value in position)
+            x, y, z = (int(round(value / quantization)) for value in position)
+            return (x, y, z)
 
         return (
             self._world_name,
@@ -342,7 +343,8 @@ class MultiPortalRirCoupler:
         quantization = self._config.quantization_m
 
         def quantize(position: Position3D) -> tuple[int, int, int]:
-            return tuple(int(round(value / quantization)) for value in position)
+            x, y, z = (int(round(value / quantization)) for value in position)
+            return (x, y, z)
 
         key = (
             self._world_name,

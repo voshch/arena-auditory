@@ -281,7 +281,7 @@ class RendererNode(ArenaMixinNode):
     def _model_tuning(self, model: type[StreamModel]) -> dict[str, float]:
         return {} if model.tuning_group is None else self._tuning[model.tuning_group]
 
-    def _on_tuning_param(self, group: type[ParamGroup], param: Param[float], value: object) -> bool:
+    def _on_tuning_param(self, group: type[ParamGroup], param: Param[object], value: object) -> bool:
         try:
             parsed = param.parse(value) if param.parse is not None else value
         except (TypeError, ValueError):
@@ -1025,7 +1025,7 @@ class RendererNode(ArenaMixinNode):
             lazy[stream].publish(lambda audio=audio: self._frame(target, apply_controls(audio, enabled=enabled, muted=muted), stamp, names, spatial=True))
         lazy[ArrayStream.MONITOR].publish(lambda: self._frame(target, stereo, stamp, STEREO_NAMES, spatial=False))
         lazy[ArrayStream.HEARING_MONO].publish(lambda: self._frame(target, hearing[None, :], stamp, ("hearing",), spatial=False))
-        target.last_levels = np.concatenate((np.asarray(rms(raw, axis=1)), [rms(hearing), rms(stereo[0]), rms(stereo[1])])).astype(np.float32)
+        target.last_levels = np.concatenate((np.asarray(rms(raw, axis=1)), [float(rms(hearing)), float(rms(stereo[0])), float(rms(stereo[1]))])).astype(np.float32)
         lazy[ArrayStream.ENERGY].publish(lambda: Float32MultiArray(data=target.last_levels.tolist()))
         if self._tdoa_conf.ENABLED.value:
             lazy[ArrayStream.TDOA].publish(lambda: self._tdoa(raw, stamp))
