@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NotRequired, TypedDict, Unpack
 
 import attrs
 import numpy as np
@@ -18,6 +18,18 @@ if TYPE_CHECKING:
     from mpl_toolkits.mplot3d import Axes3D
 
 Position3D = tuple[float, float, float]
+
+
+class _SnapshotFields(TypedDict):
+    room_specs: tuple[AcousticRoomSpec, ...]
+    source_position_m: Position3D
+    listener_position_m: Position3D
+    backend: str
+    source_zone: str
+    listener_zone: str
+    traversed_zones: NotRequired[tuple[str, ...]]
+    portal_positions_m: NotRequired[tuple[Position3D, ...]]
+    label: NotRequired[str]
 
 
 @attrs.frozen
@@ -38,11 +50,11 @@ class AcousticPlotSnapshot:
     label: str = ""
 
     @classmethod
-    def from_rir(cls, rir: RoomImpulseResponse, **kwargs: object) -> AcousticPlotSnapshot:
+    def from_rir(cls, rir: RoomImpulseResponse, **kwargs: Unpack[_SnapshotFields]) -> AcousticPlotSnapshot:
         return cls(samples=np.asarray(rir.samples, dtype=np.float64), sample_rate_hz=rir.sample_rate_hz, delay_samples=int(rir.global_delay_samples), **kwargs)
 
     @classmethod
-    def from_impulse(cls, impulse: Impulse, **kwargs: object) -> AcousticPlotSnapshot:
+    def from_impulse(cls, impulse: Impulse, **kwargs: Unpack[_SnapshotFields]) -> AcousticPlotSnapshot:
         return cls(samples=np.asarray(impulse.samples, dtype=np.float64), sample_rate_hz=impulse.sample_rate_hz, delay_samples=0, **kwargs)
 
 
@@ -56,7 +68,9 @@ class AcousticPlotDashboard:
         self._energy_bin_ms = max(float(energy_bin_ms), 0.1)
         self._early_window_s = max(float(early_window_s), 0.0)
         self._figure = plt.figure(figsize=(14.0, 8.5))
-        self._figure.canvas.manager.set_window_title("Arena pyroomacoustics diagnostics")
+        manager = self._figure.canvas.manager
+        assert manager is not None
+        manager.set_window_title("Arena pyroomacoustics diagnostics")
         self._figure.suptitle("Waiting for an acoustic RIR")
         if interactive:
             plt.show(block=False)
@@ -182,13 +196,13 @@ class AcousticPlotDashboard:
             linewidth=2.0,
             label="acoustic route",
         )
-        axis.scatter(*source, color="#e63946", s=65, label="source")
-        axis.scatter(*listener, color="#1d4ed8", s=65, label="listener")
+        axis.scatter(*source, color="#e63946", s=65, label="source")  # pyright: ignore[reportArgumentType]
+        axis.scatter(*listener, color="#1d4ed8", s=65, label="listener")  # pyright: ignore[reportArgumentType]
         if snapshot.portal_positions_m:
             axis.scatter(
                 [point[0] for point in snapshot.portal_positions_m],
                 [point[1] for point in snapshot.portal_positions_m],
-                [point[2] for point in snapshot.portal_positions_m],
+                [point[2] for point in snapshot.portal_positions_m],  # pyright: ignore[reportArgumentType]
                 color="#f4a261",
                 marker="s",
                 s=45,

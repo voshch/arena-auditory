@@ -7,7 +7,6 @@ import functools
 import json
 import time
 from dataclasses import dataclass
-from typing import Any
 
 import rclpy
 from arena_auditory_msgs.msg import HeardSoundEvent
@@ -15,6 +14,7 @@ from arena_robots.audio import ArrayStream, array_stream
 from arena_robots_msgs.msg import AudioFrame
 from geometry_msgs.msg import Point
 from rclpy.action import ActionClient
+from rclpy.action.client import ClientGoalHandle
 from rclpy.node import Node
 from rclpy.qos import QoSDurabilityPolicy, QoSProfile, QoSReliabilityPolicy
 from rclpy.task import Future
@@ -60,7 +60,7 @@ class CaptureWaiter(Node):
         self.error: str | None = None
         self.action_name = run_episode_action
         self.world = world
-        self.goal_handle = None
+        self.goal_handle: ClientGoalHandle | None = None
         self.goal_accepted: bool | None = None
         self.cancel_requested = False
         self.action_result_state: int | None = None
@@ -104,23 +104,27 @@ class CaptureWaiter(Node):
         goal.seed = -1
         self.action_client.send_goal_async(goal).add_done_callback(self._goal_response)
 
-    def _goal_response(self, future: Future[Any]) -> None:
+    def _goal_response(self, future: Future) -> None:
         try:
-            self.goal_handle = future.result()
+            goal_handle = future.result()
         except Exception as exc:
             self.error = f"episode goal failed: {exc}"
             self.done = True
             return
-        self.goal_accepted = bool(self.goal_handle.accepted)
+        assert isinstance(goal_handle, ClientGoalHandle)
+        self.goal_handle = goal_handle
+        self.goal_accepted = bool(goal_handle.accepted)
         if not self.goal_accepted:
             self.error = "episode goal was rejected"
             self.done = True
             return
-        self.goal_handle.get_result_async().add_done_callback(self._action_result)
+        goal_handle.get_result_async().add_done_callback(self._action_result)
 
-    def _action_result(self, future: Future[Any]) -> None:
+    def _action_result(self, future: Future) -> None:
         try:
-            result = future.result().result
+            response = future.result()
+            assert response is not None
+            result = response.result
             self.action_result_state = int(result.state)
             self.action_result_info = str(result.info)
             self.action_episode_id = int(result.episode_id)
@@ -134,9 +138,10 @@ class CaptureWaiter(Node):
         self.cancel_requested = True
         self.goal_handle.cancel_goal_async().add_done_callback(self._cancel_response)
 
-    def _cancel_response(self, future: Future[Any]) -> None:
+    def _cancel_response(self, future: Future) -> None:
         try:
             response = future.result()
+            assert response is not None
             if not response.goals_canceling:
                 self.error = "episode server did not accept capture-complete cancellation"
                 self.done = True

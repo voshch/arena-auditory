@@ -151,7 +151,7 @@ def _load_map(map_path: Path) -> tuple[MapFrame, Image.Image]:
         (lambda value: value if negate else 255 - value),
         mode="L",
     )
-    free = occupancy.point(lambda value: 255 if value <= limit else 0, mode="L")
+    free = occupancy.point(lambda value: 255 if value <= limit else 0, mode="L")  # pyright: ignore[reportOperatorIssue]
 
     frame = MapFrame(
         resolution=resolution,

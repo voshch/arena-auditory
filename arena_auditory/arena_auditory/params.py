@@ -71,7 +71,7 @@ class WorldGroup(ParamGroup):
     COVERAGE_ENABLED = Param[bool]("world.coverage.enabled", True)
     COVERAGE_STRIDE_CELLS = Param[int]("world.coverage.stride_cells", 10, parse=count)
     COVERAGE_TOLERANCE_M = Param[float]("world.coverage.tolerance_m", 0.35, parse=non_negative)
-    MAP_SOURCE = Param[MapSource]("debug.map_source", MapSource.COMPUTE.value, parse=MapSource)
+    MAP_SOURCE = Param[MapSource]("debug.map_source", MapSource.COMPUTE, parse=MapSource)
 
 
 class MapGroup(ParamGroup):
@@ -112,7 +112,7 @@ class Level3Group(ParamGroup):
 
 class PropagationGroup(ParamGroup):
     ENABLED = Param[bool]("propagation.enabled", True)
-    BACKEND = Param[BackendName]("propagation.backend", BackendName.PYROOMACOUSTICS.value, parse=BackendName, description="Propagation backend, pyroomacoustics, level3 or legacy.")
+    BACKEND = Param[BackendName]("propagation.backend", BackendName.PYROOMACOUSTICS, parse=BackendName, description="Propagation backend, pyroomacoustics, level3 or legacy.")
     THRESHOLD_DB = Param[float]("propagation.threshold_db", 20.0, parse=finite)
     MIN_DISTANCE_M = Param[float]("propagation.min_distance_m", 1.0, parse=positive)
     OCCLUSION_DB = Param[float]("propagation.occlusion_db", 20.0, parse=finite)
@@ -134,7 +134,7 @@ class ListenerGroup(ParamGroup):
 
 class MotorGroup(ParamGroup):
     ENABLED = Param[bool]("motor.enabled", True, description="Let robots emit drivetrain audio. Robots stay listeners regardless.")
-    MODEL = Param[MotorModel]("motor.model", MotorModel.PROCEDURAL.value, parse=MotorModel, description="Robot motor audio, calibrated procedural synthesis (Jackal, other models use WAVs) or WAV loops.")
+    MODEL = Param[MotorModel]("motor.model", MotorModel.PROCEDURAL, parse=MotorModel, description="Robot motor audio, calibrated procedural synthesis (Jackal, other models use WAVs) or WAV loops.")
     TRIM_DB = Param[float]("motor.trim_db", 0.0, parse=finite, description="Live offset in dB on the motor asset level, lower it to attenuate ego-noise.")
     FREQUENCY_SCALE = Param[float]("motor.frequency_scale", 1.0, parse=positive)
     TONAL_GAIN_DB = Param[float]("motor.tonal_gain_db", 0.0, parse=finite)
@@ -163,11 +163,11 @@ class MonitorGroup(ParamGroup):
     FRONT_GAIN = Param[float]("monitor.front_gain", 1.0, parse=within(0.0, 4.0))
     REAR_GAIN = Param[float]("monitor.rear_gain", PerRole(array=0.75, listener=1.0), parse=within(0.0, 4.0))
     SOLO = Param[str]("monitor.solo", "")
-    MODE = Param[MonitorMode]("monitor.mode", MonitorMode.STEREO.value, parse=MonitorMode)
+    MODE = Param[MonitorMode]("monitor.mode", MonitorMode.STEREO, parse=MonitorMode)
 
 
 class RenderGroup(ParamGroup):
-    ROLE = Param[RenderRole]("render.role", RenderRole.ARRAY.value, parse=RenderRole)
+    ROLE = Param[RenderRole]("render.role", RenderRole.ARRAY, parse=RenderRole)
     MAX_CATCHUP_BLOCKS = Param[int]("render.max_catchup_blocks", 40, parse=count)
     RIR_ENABLED = Param[bool]("render.rir.enabled", PerRole(array=False, listener=True))
     RIR_CROSSFADE_S = Param[float]("render.rir.crossfade_s", 0.1, parse=non_negative)
@@ -237,7 +237,7 @@ class VizGroup(ParamGroup):
     LIFETIME_S = Param[float]("viz.lifetime_s", 5.0, parse=positive)
     CONTINUOUS_LIFETIME_S = Param[float]("viz.continuous_lifetime_s", 0.5, parse=positive)
     LISTENER_ID = Param[str]("viz.listener_id", "")
-    PLOT_MODE = Param[PlotMode]("viz.plot.mode", PlotMode.OFF.value, parse=PlotMode)
+    PLOT_MODE = Param[PlotMode]("viz.plot.mode", PlotMode.OFF, parse=PlotMode)
     PLOT_LISTENER_ID = Param[str]("viz.plot.listener_id", "")
     PLOT_RATE_HZ = Param[float]("viz.plot.rate_hz", 2.0, parse=positive)
     PLOT_QUANTIZATION_M = Param[float]("viz.plot.quantization_m", 0.10, parse=positive)

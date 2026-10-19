@@ -13,7 +13,7 @@ import subprocess
 import wave
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, Iterable, Protocol, Sequence
+from typing import Any, Iterable, Protocol, Sequence, cast
 
 import numpy as np
 import pyarrow as pa
@@ -63,7 +63,8 @@ class HeaderWithFrameLike(HeaderLike, Protocol):
 class HeaderMessageLike(Protocol):
     """Message which may expose a ROS Header."""
 
-    header: HeaderLike | None
+    @property
+    def header(self) -> HeaderLike | None: ...
 
 
 class Pose2DLike(Protocol):
@@ -148,7 +149,8 @@ def quaternion_values(q: QuaternionLike) -> tuple[float, float, float, float]:
     norm = float(np.linalg.norm(values))
     if norm <= 1e-12 or not math.isfinite(norm):
         return (0.0, 0.0, 0.0, 1.0)
-    return tuple(float(value) for value in values / norm)
+    x, y, z, w = (float(value) for value in values / norm)
+    return (x, y, z, w)
 
 
 def yaw_quaternion(yaw: float) -> tuple[float, float, float, float]:
@@ -168,7 +170,8 @@ def quaternion_multiply(left: Sequence[float], right: Sequence[float]) -> tuple[
         dtype=np.float64,
     )
     values /= max(float(np.linalg.norm(values)), 1e-12)
-    return tuple(float(value) for value in values)
+    x, y, z, w = (float(value) for value in values)
+    return (x, y, z, w)
 
 
 def quaternion_slerp(left: Sequence[float], right: Sequence[float], fraction: float) -> tuple[float, float, float, float]:
@@ -185,7 +188,8 @@ def quaternion_slerp(left: Sequence[float], right: Sequence[float], fraction: fl
         angle = math.acos(dot)
         sine = math.sin(angle)
         result = math.sin((1.0 - fraction) * angle) / sine * first + math.sin(fraction * angle) / sine * second
-    return tuple(float(value) for value in result)
+    x, y, z, w = (float(value) for value in result)
+    return (x, y, z, w)
 
 
 def pcm_as_float32(chunk: AudioBlock) -> np.ndarray:
@@ -329,13 +333,14 @@ def _agent_states_pedestrians(
     timestamp_ns = _header_time_or_log_time(message, log_time)
     frame_id = str(message.header.frame_id).strip() or "map"
     if schema == "arena_humansim_msgs/msg/AgentFrame":
-        humans = np.frombuffer(message.kind, dtype=np.uint8) == 0
-        ids = np.asarray(message.agent_id, dtype=np.int64)[humans].tolist()
-        xs, ys, thetas, vxs, vys, radii, desired = (np.asarray(column, dtype=np.float64)[humans].tolist() for column in (message.x, message.y, message.theta, message.vx, message.vy, message.radius, message.desired_velocity))
-        names = [policies[index] if 0 <= index < len(policies) else "" for index in np.asarray(message.policy_idx, dtype=np.int64)[humans].tolist()]
+        frame = cast(AgentFrameLike, message)
+        humans = np.frombuffer(frame.kind, dtype=np.uint8) == 0
+        ids = np.asarray(frame.agent_id, dtype=np.int64)[humans].tolist()
+        xs, ys, thetas, vxs, vys, radii, desired = (np.asarray(column, dtype=np.float64)[humans].tolist() for column in (frame.x, frame.y, frame.theta, frame.vx, frame.vy, frame.radius, frame.desired_velocity))
+        names = [policies[index] if 0 <= index < len(policies) else "" for index in np.asarray(frame.policy_idx, dtype=np.int64)[humans].tolist()]
         agents = zip(ids, xs, ys, thetas, vxs, vys, [0.0] * len(ids), radii, desired, [""] * len(ids), names, strict=True)
     else:
-        agents = ((agent.agent_id, agent.pose.x, agent.pose.y, agent.pose.theta, agent.velocity.x, agent.velocity.y, agent.velocity.z, agent.radius, agent.desired_velocity, agent.agent_type, agent.policy) for agent in message.agents if int(agent.kind) == 0)
+        agents = ((agent.agent_id, agent.pose.x, agent.pose.y, agent.pose.theta, agent.velocity.x, agent.velocity.y, agent.velocity.z, agent.radius, agent.desired_velocity, agent.agent_type, agent.policy) for agent in cast(AgentStatesLike, message).agents if int(agent.kind) == 0)
     pedestrians: dict[str, list[dict[str, Any]]] = {}
     for raw_id, x, y, theta, vx, vy, vz, radius, desired_velocity, agent_type, policy in agents:
         agent_id = int(raw_id)
@@ -429,6 +434,7 @@ def read_mcap(path: Path) -> dict[str, Any]:
     with path.open("rb") as source:
         reader = make_reader(source, decoder_factories=[DecoderFactory()])
         for schema, channel, message, ros_msg in reader.iter_decoded_messages(log_time_order=True):
+            assert schema is not None
             topic = "/" + channel.topic.strip("/")
             topic_types[topic] = schema.name
             audio_match = AUDIO_TOPIC.fullmatch(topic)
@@ -1579,7 +1585,7 @@ def export(args: argparse.Namespace) -> Path:
             "scenario_config_sha256": scenario_sha256,
             "episode_id": episode_event["episode_id"],
             "episode_outcome_state": outcome_state,
-            "episode_outcome": OUTCOME_LABELS.get(outcome_state, str(outcome_state) if outcome_state is not None else None),
+            "episode_outcome": OUTCOME_LABELS.get(outcome_state, str(outcome_state)) if outcome_state is not None else None,
             "episode_outcome_info": outcome_info,
         }
         activity_topic = f"{track.namespace}/{track.name}/audio/{ArrayStream.ACTIVITY}"
@@ -1667,7 +1673,7 @@ def export(args: argparse.Namespace) -> Path:
             "episode_metadata_file": episode_metadata_file,
             "episode_id": episode_event["episode_id"],
             "episode_outcome_state": outcome_state,
-            "episode_outcome": OUTCOME_LABELS.get(outcome_state, str(outcome_state) if outcome_state is not None else None),
+            "episode_outcome": OUTCOME_LABELS.get(outcome_state, str(outcome_state)) if outcome_state is not None else None,
             "episode_outcome_info": outcome_info,
             "terminal_episode_recorded": terminal_event is not None,
             "ros_distribution": episode_metadata.get("ros_distro"),
@@ -1755,7 +1761,7 @@ def export(args: argparse.Namespace) -> Path:
                     "episode": {
                         "id": episode_event["episode_id"],
                         "outcome_state": outcome_state,
-                        "outcome": OUTCOME_LABELS.get(outcome_state, str(outcome_state) if outcome_state is not None else None),
+                        "outcome": OUTCOME_LABELS.get(outcome_state, str(outcome_state)) if outcome_state is not None else None,
                         "outcome_info": outcome_info,
                     },
                     "runtime": {

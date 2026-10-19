@@ -114,9 +114,9 @@ class SoundPropagationVisualizer(ArenaMixinNode):
         if self._dashboard is not None:
             self._dashboard.close()
 
-    def destroy_node(self) -> bool:
+    def destroy_node(self) -> None:
         self._tracker.destroy()
-        return super().destroy_node()
+        super().destroy_node()
 
     def _on_world_ready(self, world: AcousticWorld) -> None:
         occupancy = self._tracker.occupancy
@@ -397,7 +397,7 @@ class SoundPropagationVisualizer(ArenaMixinNode):
             for boundary in room.boundary:
                 sx, sy = boundary.start
                 ex, ey = boundary.end
-                walls.points.extend(
+                walls.points.extend(  # pyright: ignore[reportAttributeAccessIssue]
                     [
                         Point(x=sx, y=sy, z=0.0),
                         Point(x=ex, y=ey, z=0.0),

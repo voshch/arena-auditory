@@ -3,7 +3,7 @@ from __future__ import annotations
 import functools
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeGuard
 
 import attrs
 import yaml
@@ -202,6 +202,9 @@ class AcousticMaterialCatalog:
             if isinstance(raw_value, bool):
                 raise ValueError(f"{self._path}: octave-band frequency at index {index} cannot be boolean")
 
+            if not isinstance(raw_value, (int, float, str, bytes)):
+                raise ValueError(f"{self._path}: invalid octave-band frequency at index {index}: {raw_value!r}")
+
             try:
                 frequency = int(raw_value)
             except (TypeError, ValueError) as exc:
@@ -331,14 +334,14 @@ class AcousticMaterialCatalog:
                 raise ValueError(f"{self._path}: material {material.material_id!r} field {field_name!r} has {len(values)} values, expected {expected_count}")
 
     @staticmethod
-    def _is_sequence(value: object) -> bool:
+    def _is_sequence(value: object) -> TypeGuard[Sequence[object]]:
         return isinstance(value, Sequence) and not isinstance(
             value,
             (str, bytes, bytearray),
         )
 
     @staticmethod
-    def _is_number(value: object) -> bool:
+    def _is_number(value: object) -> TypeGuard[int | float]:
         return isinstance(value, (int, float)) and not isinstance(
             value,
             bool,

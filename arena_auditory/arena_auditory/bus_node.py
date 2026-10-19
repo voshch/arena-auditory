@@ -32,7 +32,7 @@ class _RobotOutputs:
     base_frame: str
     heard: Publisher
     detections: Publisher
-    markers: Publisher
+    markers: LazyPublisher[Marker]
 
 
 @attrs.frozen
@@ -57,9 +57,9 @@ class BusNode(ArenaMixinNode):
         self.create_timer(RELEASE_PERIOD_S, self._release)
         self.get_logger().info(f"robot hearing node listening on {self.resolve_topic_name(HEARD_SOUND_EVENTS)!r}, waiting for the robot fleet")
 
-    def destroy_node(self) -> bool:
+    def destroy_node(self) -> None:
         self._loader.shutdown(wait=False, cancel_futures=True)
-        return super().destroy_node()
+        super().destroy_node()
 
     def _cb_fleet(self, msg: RobotFleet) -> None:
         for binding in robot_bindings(msg):

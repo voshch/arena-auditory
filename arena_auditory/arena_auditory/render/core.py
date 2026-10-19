@@ -154,7 +154,7 @@ class RenderParams:
     resolve: Callable[[str], np.ndarray]
     impulse: Callable[[str], ImpulseShape | None] = no_impulse
     rir_crossfade_frames: int = 1
-    log_error: Callable[[str], None] = _log_error
+    log_error: Callable[[str], object] = _log_error
 
 
 class RirStage:

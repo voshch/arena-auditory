@@ -35,7 +35,7 @@ def _stack(context: launch.LaunchContext) -> list[launch.LaunchDescriptionEntity
             additional_env=env,
         )
 
-    nodes = [
+    nodes: list[launch.LaunchDescriptionEntity] = [
         node("sound_propagation_node", "sound_propagation_node"),
         node("human_emitter", "human_emitter"),
         node("robot_emitter", "robot_emitter"),
