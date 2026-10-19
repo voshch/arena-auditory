@@ -6,7 +6,7 @@ import json
 import math
 import time
 import wave
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any, Protocol
 
 from pydantic import Field
 
@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     import numpy as np
     from arena_auditory_msgs.msg import ContinuousHeardSoundState, HeardSoundEvent, RoomImpulse
     from mcp.server.mcpserver import Audio
+    from std_msgs.msg import Header
 
     from arena_mcp.core.ros import TopicCache
 
@@ -54,7 +55,12 @@ async def _now() -> float:
     return (await ROS.node()).sim_time.to_seconds()
 
 
-def _recent[MsgT](received: list[MsgT], window_s: float, now: float) -> list[MsgT]:
+class _Stamped(Protocol):
+    @property
+    def header(self) -> Header: ...
+
+
+def _recent[MsgT: _Stamped](received: list[MsgT], window_s: float, now: float) -> list[MsgT]:
     stamps = [msgs.seconds(msg.header.stamp) for msg in received]
     reference = now if now > 0.0 else max(stamps, default=0.0)
     return [msg for msg, stamp in zip(received, stamps, strict=True) if reference - window_s <= stamp <= reference + 1.0]
