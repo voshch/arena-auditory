@@ -61,6 +61,10 @@ robot/source pose and velocity, relative Cartesian position, range, bearing,
 elevation, radial velocity, occupancy line-of-sight labels, and audio RMS/peak
 features. Robot, pedestrian, and TF trajectory exports retain normalized
 quaternion `qx,qy,qz,qw` fields in addition to convenient planar yaw values.
+Pedestrian positions carry the HumanSim flow source and release index
+(`source_name`, `source_seq`, `pedestrian_source_*` in the labels), empty and 0
+for scripted pedestrians and recordings without them, which pair a released
+pedestrian across runs and seeds.
 
 `sound_activity.parquet` contains the actual half-open sample intervals placed
 on the raw microphone-array clock, grouped across microphone channels. Frame

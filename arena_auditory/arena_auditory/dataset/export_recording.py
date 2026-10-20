@@ -27,6 +27,7 @@ PCM_S16LE = 1
 PCM_F32LE = 2
 EXPORTED_STREAMS = (ArrayStream.RAW, ArrayStream.STEM_MOTOR, ArrayStream.STEM_PEDESTRIAN, ArrayStream.STEM_AMBIENT, ArrayStream.MONITOR)
 STEMS = (ArrayStream.STEM_MOTOR, ArrayStream.STEM_PEDESTRIAN, ArrayStream.STEM_AMBIENT)
+ATTRIBUTED_AGENT_META = re.compile(r"^\s*string\[\]\s+source_name\b", re.M)
 AUDIO_TOPIC = re.compile(rf"(?P<environment>/.+)/(?P<robot>[^/]+)/audio/(?P<stream>{'|'.join(re.escape(stream) for stream in EXPORTED_STREAMS)})")
 OUTCOME_LABELS = {0: "QUEUED", 1: "RUNNING", 2: "SUCCESS", 3: "FAILED", 4: "SKIPPED", 5: "FATAL"}
 TERMINAL_OUTCOMES = frozenset((2, 3, 4, 5))
@@ -328,8 +329,9 @@ def _agent_states_pedestrians(
     topic: str,
     log_time: int,
     policies: Sequence[str] = (),
+    sources: dict[int, tuple[str, int]] | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
-    """Pedestrian samples from HumanSim's AgentStates or AgentFrame (policies from AgentMeta), map frame when frame_id is empty, robots skipped."""
+    """Pedestrian samples from HumanSim's AgentStates or AgentFrame (policies and sources from AgentMeta), map frame when frame_id is empty, robots skipped."""
     timestamp_ns = _header_time_or_log_time(message, log_time)
     frame_id = str(message.header.frame_id).strip() or "map"
     if schema == "arena_humansim_msgs/msg/AgentFrame":
@@ -341,10 +343,12 @@ def _agent_states_pedestrians(
         agents = zip(ids, xs, ys, thetas, vxs, vys, [0.0] * len(ids), radii, desired, [""] * len(ids), names, strict=True)
     else:
         agents = ((agent.agent_id, agent.pose.x, agent.pose.y, agent.pose.theta, agent.velocity.x, agent.velocity.y, agent.velocity.z, agent.radius, agent.desired_velocity, agent.agent_type, agent.policy) for agent in cast(AgentStatesLike, message).agents if int(agent.kind) == 0)
+    sources = sources or {}
     pedestrians: dict[str, list[dict[str, Any]]] = {}
     for raw_id, x, y, theta, vx, vy, vz, radius, desired_velocity, agent_type, policy in agents:
         agent_id = int(raw_id)
         key = f"agent_{agent_id}"
+        source_name, source_seq = sources.get(agent_id, ("", 0))
         pedestrians.setdefault(key, []).append(
             {
                 "timestamp_ns": timestamp_ns,
@@ -367,6 +371,8 @@ def _agent_states_pedestrians(
                 "desired_velocity": float(desired_velocity),
                 "agent_type": str(agent_type),
                 "policy": str(policy),
+                "source_name": source_name,
+                "source_seq": source_seq,
                 "state_source": "agent_states",
                 "state_source_topic": topic,
                 "topic": topic,
@@ -374,6 +380,13 @@ def _agent_states_pedestrians(
             }
         )
     return pedestrians
+
+
+def _agent_meta_sources(agent_ids: Sequence[int], source_names: Sequence[str], source_seqs: Sequence[int]) -> dict[int, tuple[str, int]]:
+    """Source name and release index per agent id of an AgentMeta, none when the arrays do not match agent_id."""
+    if len(source_names) != len(agent_ids) or len(source_seqs) != len(agent_ids):
+        return {}
+    return {int(agent_id): (str(name), int(seq)) for agent_id, name, seq in zip(agent_ids, source_names, source_seqs, strict=True)}
 
 
 def _merge_pedestrian_sources(
@@ -405,6 +418,8 @@ def _merge_pedestrian_sources(
                     "desired_velocity": agent.get("desired_velocity"),
                     "agent_type": agent.get("agent_type", ""),
                     "policy": agent.get("policy", ""),
+                    "source_name": agent.get("source_name", ""),
+                    "source_seq": agent.get("source_seq", 0),
                     "state_source": "arena_peds+agent_states",
                     "state_source_topic": [row["topic"], agent["topic"]],
                 }
@@ -422,6 +437,7 @@ def read_mcap(path: Path) -> dict[str, Any]:
     arena_pedestrians: dict[str, list[dict[str, Any]]] = {}
     agent_state_pedestrians: dict[str, list[dict[str, Any]]] = {}
     agent_policies: dict[str, list[str]] = {}
+    agent_sources: dict[str, dict[int, tuple[str, int]]] = {}
     maps: dict[str, list[dict[str, Any]]] = {"map": [], "door_mask": []}
     transforms: dict[tuple[str, str], list[dict[str, Any]]] = {}
     clocks: list[int] = []
@@ -547,6 +563,8 @@ def read_mcap(path: Path) -> dict[str, Any]:
                             "desired_velocity": None,
                             "agent_type": "",
                             "policy": "",
+                            "source_name": "",
+                            "source_seq": 0,
                             "state_source": "arena_peds",
                             "state_source_topic": topic,
                             "topic": topic,
@@ -555,8 +573,10 @@ def read_mcap(path: Path) -> dict[str, Any]:
                     )
             elif topic.endswith("/agent_meta"):
                 agent_policies[topic.removesuffix("/agent_meta")] = list(ros_msg.policies)
+                agent_sources[topic.removesuffix("/agent_meta")] = _agent_meta_sources(ros_msg.agent_id, ros_msg.source_name, ros_msg.source_seq) if ATTRIBUTED_AGENT_META.search(schema.data.decode()) else {}
             elif topic.endswith("/agent_states"):
-                decoded = _agent_states_pedestrians(ros_msg, schema.name, topic, message.log_time, agent_policies.get(topic.removesuffix("/agent_states"), ()))
+                prefix = topic.removesuffix("/agent_states")
+                decoded = _agent_states_pedestrians(ros_msg, schema.name, topic, message.log_time, agent_policies.get(prefix, ()), agent_sources.get(prefix))
                 for key, rows in decoded.items():
                     agent_state_pedestrians.setdefault(key, []).extend(rows)
             elif topic.endswith(f"/{SOUND_EVENTS}"):
@@ -1171,6 +1191,8 @@ def build_labels(
                     "pedestrian_desired_velocity_mps": ped.get("desired_velocity"),
                     "pedestrian_agent_type": ped.get("agent_type", ""),
                     "pedestrian_policy": ped.get("policy", ""),
+                    "pedestrian_source_name": ped.get("source_name", ""),
+                    "pedestrian_source_seq": ped.get("source_seq", 0),
                     "pedestrian_state_source": ped.get("state_source", "arena_peds"),
                     "pedestrian_state_source_topic": ped.get("state_source_topic", ped.get("topic")),
                     "relative_x_world": dx,
