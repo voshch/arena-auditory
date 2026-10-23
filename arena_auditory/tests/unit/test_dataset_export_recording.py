@@ -251,8 +251,8 @@ def test_labels_join_audio_to_interpolated_robot_and_pedestrian_pose():
     ]
     peds = {
         "ped_1": [
-            {"timestamp_ns": 1_000_000_000, "pedestrian_id": 1, "pedestrian_name": "ped_1", "x": 0.0, "y": 2.0, "z": 0.0, "yaw": 0.0, "vx": 0.0, "vy": 0.0, "vz": 0.0, "model_uri": "adult"},
-            {"timestamp_ns": 1_020_000_000, "pedestrian_id": 1, "pedestrian_name": "ped_1", "x": 2.0, "y": 2.0, "z": 0.0, "yaw": 0.0, "vx": 1.0, "vy": 0.0, "vz": 0.0, "model_uri": "adult"},
+            {"timestamp_ns": 1_000_000_000, "pedestrian_id": 1, "pedestrian_name": "ped_1", "x": 0.0, "y": 2.0, "z": 0.0, "yaw": 0.0, "vx": 0.0, "vy": 0.0, "vz": 0.0, "model_uri": "adult", "source_name": "source_0", "source_seq": 2},
+            {"timestamp_ns": 1_020_000_000, "pedestrian_id": 1, "pedestrian_name": "ped_1", "x": 2.0, "y": 2.0, "z": 0.0, "yaw": 0.0, "vx": 1.0, "vy": 0.0, "vz": 0.0, "model_uri": "adult", "source_name": "source_0", "source_seq": 2},
         ]
     }
 
@@ -261,6 +261,7 @@ def test_labels_join_audio_to_interpolated_robot_and_pedestrian_pose():
     assert len(labels) == 2
     assert labels[1]["robot_x"] == 1.0
     assert labels[1]["pedestrian_x"] == 1.0
+    assert (labels[1]["pedestrian_source_name"], labels[1]["pedestrian_source_seq"]) == ("source_0", 2)
     assert labels[1]["range_m"] == 2.0
     assert labels[1]["bearing_robot_rad"] == np.pi / 2
     assert labels[1]["rendered_ch0_rms"] == 0.5
@@ -420,6 +421,90 @@ def test_read_mcap_agent_states_and_agent_frame_layouts_export_identical_pedestr
     assert [rows[0]["policy"] for rows in new["pedestrians"].values()] == ["social_force", ""]
     assert new["pedestrians"]["agent_12"][0]["frame_id"] == "map"
     assert new["pedestrian_state_source"] == old["pedestrian_state_source"] == "agent_states"
+    assert {(rows[0]["source_name"], rows[0]["source_seq"]) for rows in new["pedestrians"].values()} == {("", 0)}
+
+
+def _attributed_frame(msgs) -> object:
+    frame = msgs.AgentFrame()
+    frame.header.stamp.sec = 3
+    frame.agent_id, frame.kind, frame.x, frame.y, frame.theta, frame.vx, frame.vy, frame.radius, frame.desired_velocity, _ = (list(column) for column in zip(*_RECORDED_AGENTS, strict=True))
+    frame.policy_idx = [-1] * len(_RECORDED_AGENTS)
+    return frame
+
+
+def test_read_mcap_pairs_agent_frame_pedestrians_with_their_source_and_release_index(tmp_path: Path) -> None:
+    msgs = pytest.importorskip("arena_humansim_msgs.msg")
+    meta = msgs.AgentMeta(policies=["orca"], agent_id=[12, 99, 13], name=["", "", ""], handedness=["", "", ""], agent_type=["adult", "", "adult"], source_name=["source_1", "", ""], source_seq=[7, 0, 0])
+
+    data = read_mcap(
+        _record_mcap(
+            tmp_path / "flat",
+            [
+                ("/arena/env_0/task_generator_node/agent_meta", "arena_humansim_msgs/msg/AgentMeta", meta, 1),
+                (_STATES_TOPIC, "arena_humansim_msgs/msg/AgentFrame", _attributed_frame(msgs), 2),
+            ],
+        )
+    )
+
+    assert {key: (rows[0]["source_name"], rows[0]["source_seq"]) for key, rows in data["pedestrians"].items()} == {"agent_12": ("source_1", 7), "agent_13": ("", 0)}
+
+
+_HEADER_DEFINITION = """================================================================================
+MSG: std_msgs/Header
+builtin_interfaces/Time stamp
+string frame_id
+================================================================================
+MSG: builtin_interfaces/Time
+int32 sec
+uint32 nanosec
+"""
+_AGENT_META_BEFORE_SOURCES = """std_msgs/Header header
+string[] policies
+int32[] agent_id
+string[] name
+string[] handedness
+string[] agent_type
+"""
+
+
+def test_read_mcap_recorded_before_source_attribution_reads_empty_sources(tmp_path: Path) -> None:
+    pytest.importorskip("arena_humansim_msgs.msg")
+    from ament_index_python.packages import get_package_share_directory
+    from mcap_ros2.writer import Writer
+
+    frame_definition = (Path(get_package_share_directory("arena_humansim_msgs")) / "msg" / "AgentFrame.msg").read_text()
+    header = {"stamp": {"sec": 3, "nanosec": 0}, "frame_id": ""}
+    frame = {
+        "header": header,
+        "agent_id": [12, 99, 13],
+        "x": [1.5, 4.0, -0.5],
+        "y": [-2.0, 4.0, 3.25],
+        "theta": [0.0] * 3,
+        "vx": [0.0] * 3,
+        "vy": [0.0] * 3,
+        "desired_velocity": [1.2, 0.0, 1.0],
+        "radius": [0.35, 0.4, 0.3],
+        "kind": [0, 1, 0],
+        "animation_state": [],
+        "policy_idx": [0, -1, -1],
+        "gait_phase": [],
+        "gait_cadence": [],
+        "interaction_id": [],
+        "interaction_type": [],
+    }
+    meta = {"header": header, "policies": ["orca"], "agent_id": [12, 99, 13], "name": ["", "", ""], "handedness": ["", "", ""], "agent_type": ["", "", ""]}
+    path = tmp_path / "before_sources.mcap"
+    with path.open("wb") as sink:
+        writer = Writer(sink)
+        meta_schema = writer.register_msgdef("arena_humansim_msgs/msg/AgentMeta", _AGENT_META_BEFORE_SOURCES + _HEADER_DEFINITION)
+        frame_schema = writer.register_msgdef("arena_humansim_msgs/msg/AgentFrame", frame_definition + _HEADER_DEFINITION)
+        writer.write_message("/arena/env_0/task_generator_node/agent_meta", meta_schema, meta, log_time=1, publish_time=1)
+        writer.write_message(_STATES_TOPIC, frame_schema, frame, log_time=2, publish_time=2)
+        writer.finish()
+
+    data = read_mcap(path)
+
+    assert {key: (rows[0]["policy"], rows[0]["source_name"], rows[0]["source_seq"]) for key, rows in data["pedestrians"].items()} == {"agent_12": ("orca", "", 0), "agent_13": ("", "", 0)}
 
 
 def test_arena_pedestrians_are_enriched_from_agent_states_by_shared_id():
@@ -468,6 +553,8 @@ def test_arena_pedestrians_are_enriched_from_agent_states_by_shared_id():
                 "desired_velocity": 1.2,
                 "agent_type": "adult",
                 "policy": "social_force",
+                "source_name": "source_1",
+                "source_seq": 4,
                 "state_source": "agent_states",
                 "state_source_topic": "/agent_states",
                 "topic": "/agent_states",
@@ -482,6 +569,7 @@ def test_arena_pedestrians_are_enriched_from_agent_states_by_shared_id():
     assert row["model_uri"] == "adult"
     assert row["radius"] == 0.35
     assert row["desired_velocity"] == 1.2
+    assert (row["source_name"], row["source_seq"]) == ("source_1", 4)
     assert row["state_source"] == "arena_peds+agent_states"
     assert row["state_source_topic"] == ["/arena_peds", "/agent_states"]
 
