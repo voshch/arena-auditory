@@ -11,6 +11,7 @@ from collections import OrderedDict, deque
 from collections.abc import Callable, Hashable, Iterable, Iterator
 
 import attrs
+import rclpy.parameter
 import rclpy.time
 import shapely
 import tf2_ros
@@ -723,6 +724,8 @@ class SoundPropagationNode(ArenaMixinNode):
                 response.error_msg = f"unknown runtime microphone {listener_id!r}"
             return response
         self._spawned_microphones.pop(listener_id)
+        if str(self._listener_id.value).strip() == listener_id:
+            self.set_parameters([rclpy.parameter.Parameter(self._listener_id.name, value="")])
         self._stop_outputs(lambda candidate: candidate != listener_id, forget=True)
         self._publish_registry()
         response.success = True

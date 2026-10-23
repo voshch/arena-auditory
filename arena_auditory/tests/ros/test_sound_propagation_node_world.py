@@ -305,6 +305,9 @@ def test_spawn_microphone_assigns_zone_and_next_index(rclpy_context):
         removed = _remove(propagation, outside_zone.listener_id)
         assert removed.success is True
         assert outside_zone.listener_id not in propagation._spawned_microphones
+        assert _select(propagation, fifth.listener_id)
+        assert _remove(propagation, fifth.listener_id).success is True
+        assert propagation.get_parameter("listener.id").value == ""
 
         authored_id = "microphone:zone:demo_zone:ceiling:1"
         authored = WorldMicrophoneSpec(listener_id=authored_id, zone="demo_zone", placement="ceiling", frame="map", position=(min_x + 1.0, min_y + 1.0, ceiling), ceiling_height_m=ceiling)
