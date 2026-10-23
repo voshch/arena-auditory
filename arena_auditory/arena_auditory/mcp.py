@@ -10,16 +10,15 @@ from typing import TYPE_CHECKING, Annotated, Any, Protocol
 
 from pydantic import Field
 
-from arena_auditory.constants import CONTINUOUS_AUDIO_SOURCES, CONTINUOUS_HEARD_SOUNDS, HEARD_SOUND_EVENTS, MAP, MICROPHONE_LISTENERS, REMOVE_MICROPHONE, ROOM_IMPULSES, SOUND_EVENTS, SPAWN_MICROPHONE
+from arena_auditory.constants import CONTINUOUS_AUDIO_SOURCES, CONTINUOUS_HEARD_SOUNDS, HEARD_SOUND_EVENTS, MAP, MICROPHONE_LISTENERS, PROPAGATION_NODE, REMOVE_MICROPHONE, ROOM_IMPULSES, SOUND_EVENTS, SPAWN_MICROPHONE
 from arena_mcp.core import LATCHED, RELIABLE, ROS, SENSOR, Domain, ToolError, msgs, robot_ns, tg
+from arena_mcp.core.ros import TopicCache
 
 if TYPE_CHECKING:
     import numpy as np
     from arena_auditory_msgs.msg import ContinuousHeardSoundState, HeardSoundEvent, RoomImpulse
     from mcp.server.mcpserver import Audio
     from std_msgs.msg import Header
-
-    from arena_mcp.core.ros import TopicCache
 
 domain = Domain(
     "acoustics",
@@ -30,7 +29,6 @@ domain = Domain(
 )
 
 NO_AUDITORY = "the env runs without acoustics:=arena, or its sound propagation node is not up"
-PROPAGATION_NODE = "sound_propagation_node"
 DEPTH = 4096
 MAX_WAIT_S = 10.0
 MAX_AUDIO_S = 10.0
@@ -119,6 +117,8 @@ def _decay_time(edc_db: np.ndarray, rate: int) -> float | None:
 def _impulse(msg: RoomImpulse) -> dict[str, Any]:
     import numpy as np
 
+    from arena_auditory.propagation.plot import schroeder_decay_db
+
     samples = np.asarray(msg.samples, dtype=np.float64)
     rate = int(msg.sample_rate_hz)
     out: dict[str, Any] = {"key": msg.key, "backend": msg.backend, "stamp": msgs.seconds(msg.header.stamp), "sample_rate_hz": rate, "lead_samples": int(msg.lead_samples), "samples": int(samples.size)}
@@ -130,8 +130,7 @@ def _impulse(msg: RoomImpulse) -> dict[str, Any]:
     out["peak"] = float(np.abs(samples).max())
     if total <= 0.0:
         return out
-    edc = np.cumsum(energy[::-1])[::-1]
-    out["rt60_s"] = _decay_time(10.0 * np.log10(np.maximum(edc / edc[0], 1e-12)), rate)
+    out["rt60_s"] = _decay_time(schroeder_decay_db(samples), rate)
     half = max(1, round(0.0025 * rate))
     lead = int(msg.lead_samples)
     direct = float(energy[max(0, lead - half) : lead + half + 1].sum())
@@ -144,9 +143,11 @@ async def acoustics_microphones(env_id: int | None = None) -> dict[str, Any]:
     """Every listener the propagation node knows and the selected one. Robots and pedestrians always hear, a microphone only while selected."""
     from std_msgs.msg import String
 
+    from arena_auditory.params import ListenerGroup
+
     node = await tg(env_id)
     msg = await ROS.latest(String, f"{node}/{MICROPHONE_LISTENERS}", qos=LATCHED, timeout=3.0, hint=NO_AUDITORY)
-    selected = (await ROS.get_params(f"{node}/{PROPAGATION_NODE}", ["listener.id"]))["listener.id"]
+    selected = (await ROS.get_params(f"{node}/{PROPAGATION_NODE}", [ListenerGroup.ID.name]))[ListenerGroup.ID.name]
     return {"task_generator": node, "selected": selected or None, "listeners": [_listener(listener_id) for listener_id in json.loads(msg.data)]}
 
 
@@ -165,6 +166,8 @@ async def acoustics_spawn_microphone(
     from arena_auditory_msgs.srv import SpawnMicrophone
     from nav_msgs.msg import OccupancyGrid
 
+    from arena_auditory.params import ListenerGroup
+
     node = await tg(env_id)
     if frame is None:
         grid = await ROS.latest(OccupancyGrid, f"{node}/{MAP}", qos=LATCHED, timeout=3.0, hint="the env map is not published yet, pass frame")
@@ -176,7 +179,7 @@ async def acoustics_spawn_microphone(
     if not response.success:
         raise ToolError(f"spawn_microphone rejected: {response.error_msg}")
     if select:
-        result = (await ROS.set_params(f"{node}/{PROPAGATION_NODE}", {"listener.id": response.listener_id}))["listener.id"]
+        result = (await ROS.set_params(f"{node}/{PROPAGATION_NODE}", {ListenerGroup.ID.name: response.listener_id}))[ListenerGroup.ID.name]
         if not result["ok"]:
             raise ToolError(f"spawned {response.listener_id} but could not select it: {result['reason']}")
     return {"listener_id": response.listener_id, "zone": response.zone, "attached_frame": response.attached_frame, "frame": frame, "selected": select}
@@ -294,8 +297,11 @@ async def acoustics_audio(
 ) -> list[Any]:
     """A short capture of a robot's audio stream as 16 bit WAV, with per-channel levels."""
     import numpy as np
+    from arena_rclpy_mixins.qos import reliable
     from arena_robots.audio import ArrayStream, array_stream, dbfs_from_rms, rms
     from arena_robots_msgs.msg import AudioFrame
+
+    from arena_mcp.core.ros import TopicCache
 
     if not 0.0 < seconds <= MAX_AUDIO_S:
         raise ToolError(f"seconds must be in (0, {MAX_AUDIO_S:g}]")
@@ -310,17 +316,22 @@ async def acoustics_audio(
         raise ToolError(f"{topic} is not published", hint=f"{NO_AUDITORY}, or the robot has no microphone array")
     if "arena_robots_msgs/msg/AudioFrame" not in types[topic]:
         raise ToolError(f"{topic} carries {', '.join(types[topic])}, not audio frames")
-    cache = await ROS.cache(AudioFrame, topic, qos=RELIABLE, depth=DEPTH)
-    first = await ROS.next(AudioFrame, topic, qos=RELIABLE, timeout=5.0)
-    frames = [first]
-    rate = int(first.sample_rate)
-    needed = int(seconds * rate)
-    deadline = time.monotonic() + 10.0 + 4.0 * seconds
-    while sum(frame.frame_count for frame in frames) < needed and time.monotonic() < deadline:
-        await asyncio.sleep(0.05)
-        history = list(cache.history)
-        start = next((index for index, frame in enumerate(history) if frame is first), None)
-        frames = history[start:] if start is not None else frames
+    cache = TopicCache(asyncio.get_running_loop(), DEPTH)
+    subscription = node.create_subscription(AudioFrame, topic, cache.on_message, reliable(DEPTH))
+    try:
+        try:
+            first = await asyncio.wait_for(cache.next(), 5.0)
+        except TimeoutError as exc:
+            raise ToolError(f"no new message on {topic} within 5s") from exc
+        rate = int(first.sample_rate)
+        needed = int(seconds * rate)
+        deadline = time.monotonic() + 10.0 + 4.0 * seconds
+        frames = list(cache.history)
+        while sum(frame.frame_count for frame in frames) < needed and time.monotonic() < deadline:
+            await asyncio.sleep(0.05)
+            frames = list(cache.history)
+    finally:
+        node.destroy_subscription(subscription)
     blocks = []
     for frame in frames:
         values = np.asarray(frame.data, dtype=np.float32)

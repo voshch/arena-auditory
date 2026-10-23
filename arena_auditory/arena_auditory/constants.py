@@ -1,4 +1,4 @@
-"""Topic and service names of the auditory stack. Names resolve below the task generator node, ARENA_PEDS and PEDESTRIAN_MARKERS_EXTRA below the env namespace."""
+"""Topic, service and node names of the auditory stack. Names resolve below the task generator node, ARENA_PEDS and PEDESTRIAN_MARKERS_EXTRA below the env namespace."""
 
 from __future__ import annotations
 
@@ -26,6 +26,7 @@ VIEWPORT_CAMERA_POSE = "/arena/viewport/camera_pose"
 ARENA_PEDS = "arena_peds"
 PEDESTRIAN_MARKERS_EXTRA = "pedestrian_markers/extra"
 BUS_FRONTEND = "bus"
+PROPAGATION_NODE = "sound_propagation_node"
 
 
 def heard_sound(robot: str) -> str:

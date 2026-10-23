@@ -238,16 +238,28 @@ def test_impulse_is_found_through_the_latest_reception_of_its_listener(rig: Rig)
 
 
 def test_audio_capture_returns_a_wav_of_the_robot_stream(rig: Rig):
+    topic = f"{rig.tg}/jackal/audio/raw_array"
+
+    async def own_subscriptions():
+        node = await ROS.node()
+        return [info for info in node.get_subscriptions_info_by_topic(topic) if info.node_name == node.get_name()]
+
     async def scenario():
         captured = await acoustics.acoustics_audio(seconds=0.5)
+        deadline = time.monotonic() + 3.0
+        left = await own_subscriptions()
+        while left and time.monotonic() < deadline:
+            await asyncio.sleep(0.1)
+            left = await own_subscriptions()
         with pytest.raises(ToolError, match="unknown stream"):
             await acoustics.acoustics_audio(stream="nope")
         with pytest.raises(ToolError, match="is not published"):
             await acoustics.acoustics_audio(stream="stem_motor")
-        return captured
+        return captured, left
 
-    summary, audio = rig.run(scenario())
-    assert summary["topic"] == f"{rig.tg}/jackal/audio/raw_array"
+    (summary, audio), left = rig.run(scenario())
+    assert left == []
+    assert summary["topic"] == topic
     assert summary["complete"] is True
     assert summary["channel_names"] == ["left", "right"]
     assert summary["level_dbfs"] == [pytest.approx(-6.0, abs=0.3), pytest.approx(-12.0, abs=0.3)]

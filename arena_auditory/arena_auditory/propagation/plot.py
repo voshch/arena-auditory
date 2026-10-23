@@ -20,6 +20,14 @@ if TYPE_CHECKING:
 Position3D = tuple[float, float, float]
 
 
+def schroeder_decay_db(samples: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Energy remaining after each sample in dB of the total, the Schroeder backward integral."""
+    energy = samples * samples
+    decay = np.cumsum(energy[::-1])[::-1]
+    decay /= max(float(decay[0]), 1e-30)
+    return 10.0 * np.log10(np.maximum(decay, 1e-12))
+
+
 class _SnapshotFields(TypedDict):
     room_specs: tuple[AcousticRoomSpec, ...]
     source_position_m: Position3D
@@ -265,11 +273,7 @@ class AcousticPlotDashboard:
         samples: NDArray[np.float64],
         physical_time_ms: NDArray[np.float64],
     ) -> None:
-        energy = samples * samples
-        decay = np.cumsum(energy[::-1])[::-1]
-        decay /= max(float(decay[0]), 1e-30)
-        decay_db = 10.0 * np.log10(np.maximum(decay, 1e-12))
-        axis.plot(physical_time_ms, decay_db, color="#264653", linewidth=1.2)
+        axis.plot(physical_time_ms, schroeder_decay_db(samples), color="#264653", linewidth=1.2)
         for level in (-5.0, -25.0, -35.0, -60.0):
             axis.axhline(level, color="#adb5bd", linewidth=0.6, linestyle=":")
         axis.set_ylim(-80.0, 2.0)

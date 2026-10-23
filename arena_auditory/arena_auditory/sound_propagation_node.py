@@ -45,6 +45,7 @@ from arena_auditory.constants import (
     HEARD_SOUND_EVENTS,
     MICROPHONE_LISTENERS,
     MICROPHONE_MARKERS,
+    PROPAGATION_NODE,
     REMOVE_MICROPHONE,
     ROOM_IMPULSES,
     SOUND_EVENTS,
@@ -126,7 +127,7 @@ def _apply_transform(point: Vec3, transform_: Transform) -> Vec3:
 
 class SoundPropagationNode(ArenaMixinNode):
     def __init__(self) -> None:
-        super().__init__("sound_propagation_node")
+        super().__init__(PROPAGATION_NODE)
         self.conf = Configuration(self)
         self._params = self.conf.Propagation
         self._listener_id = self.conf.Listener.ID
