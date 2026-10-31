@@ -23,7 +23,7 @@ feeds it.
 arena_auditory/                 this repository
 |-- arena_auditory/             ament_python package
 |   |-- arena_auditory/         python package
-|   |   |-- api.py              the names the task_generator acoustics backend imports
+|   |   |-- api.py              the names the arena_runtime acoustics backend imports
 |   |   |-- shared.py           SourceSpec, ListenerId
 |   |   |-- constants.py        every topic and service name
 |   |   |-- params.py           every node parameter and its default
@@ -613,5 +613,5 @@ tests call the acoustics tools against a live `sound_propagation_node`.
 | `arena_auditory/params.py` | every node parameter, default and launch description |
 | `arena_simulation_setup/configs/sounds/kinds.yaml` (Arena) | kinds table |
 | `arena_robots/config/audio/arrays/*.yaml` (Arena) | microphone array presets |
-| `task_generator/launch/acoustics/arena/` (Arena) | install check and the include of `launch/arena_auditory.launch.py` |
-| `task_generator/task_generator/simulators/acoustics/arena/` (Arena) | node-side backend, the single gateway into this package |
+| `arena_runtime/arena_runtime/launch/acoustics/arena/` (Arena) | install check and the include of `launch/arena_auditory.launch.py` |
+| `arena_runtime/arena_runtime/arena_runtime/acoustics/arena/` (Arena) | node-side backend, the single gateway into this package |

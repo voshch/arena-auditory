@@ -1,4 +1,4 @@
-"""Public surface of arena_auditory for the task_generator acoustics backend."""
+"""Public surface of arena_auditory for the arena_runtime acoustics backend."""
 
 from __future__ import annotations
 
