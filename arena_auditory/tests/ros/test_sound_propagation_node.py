@@ -10,6 +10,8 @@ import uuid
 
 import pytest
 
+_spin_until = pytest.importorskip("arena_rclpy_mixins.testing").spin_until
+
 
 @pytest.fixture(autouse=True)
 def _ros_gate():
@@ -41,16 +43,6 @@ def _launch(parameters: dict[str, object] | None = None, cli_args: list[str] | N
         return LaunchedPropagation()
 
     return asyncio.run(construct())
-
-
-def _spin_until(rclpy, nodes, predicate, timeout_sec: float = 10.0) -> None:
-    deadline = time.monotonic() + timeout_sec
-    while time.monotonic() < deadline:
-        for node in nodes:
-            rclpy.spin_once(node, timeout_sec=0.02)
-        if predicate():
-            return
-    raise AssertionError("timed out waiting for ROS round-trip")
 
 
 def _robot_name() -> str:
