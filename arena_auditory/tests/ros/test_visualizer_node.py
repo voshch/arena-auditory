@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import asyncio
-import time
 import uuid
 
 import pytest
+
+_spin_until = pytest.importorskip("arena_rclpy_mixins.testing").spin_until
 
 
 @pytest.fixture(autouse=True)
@@ -13,15 +13,6 @@ def _ros_gate():
     pytest.importorskip("arena_auditory_msgs.msg")
     pytest.importorskip("geometry_msgs.msg")
     pytest.importorskip("visualization_msgs.msg")
-
-
-@pytest.fixture
-def loop():
-    event_loop = asyncio.new_event_loop()
-    try:
-        yield event_loop
-    finally:
-        event_loop.close()
 
 
 def _build(event_loop, node_cls, namespace: str, params: dict[str, object] | None = None):
@@ -40,16 +31,6 @@ def _build(event_loop, node_cls, namespace: str, params: dict[str, object] | Non
         return scoped()
 
     return event_loop.run_until_complete(build())
-
-
-def _spin_until(rclpy, nodes, predicate, timeout_sec: float = 5.0) -> None:
-    deadline = time.monotonic() + timeout_sec
-    while time.monotonic() < deadline:
-        for node in nodes:
-            rclpy.spin_once(node, timeout_sec=0.02)
-        if predicate():
-            return
-    raise AssertionError("timed out waiting for ROS round-trip")
 
 
 def _heard(listener_id: str, *, source_x: float = 0.0):

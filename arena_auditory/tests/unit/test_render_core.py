@@ -260,14 +260,18 @@ def test_motor_stem_is_silent_when_no_drivetrain_channel_is_active() -> None:
     assert np.max(np.abs(raw)) > 0.0
 
 
-def test_motor_trim_change_remixes_as_a_scalar_on_the_stem() -> None:
+def test_motor_trim_change_is_a_scalar_on_the_motor_stem_and_moves_nothing_else() -> None:
     attenuation_db = 6.0
     quiet = {**_MOTOR_TUNING, TRIM_DB: _MOTOR_TUNING[TRIM_DB] - attenuation_db}
-    raw, _, _, motor, _ = _render_scenario(3, continuous_gain=0.02, with_clip=False)
-    remixed_raw, _, _, remixed_motor, _ = _render_scenario(3, continuous_gain=0.02, with_clip=False, tuning=quiet)
+    raw, ped, ambient, motor, clipped = _render_scenario(3, continuous_gain=0.02)
+    remixed_raw, quiet_ped, quiet_ambient, quiet_motor, _ = _render_scenario(3, continuous_gain=0.02, tuning=quiet)
     gain = 10.0 ** (-attenuation_db / 20.0)
+    assert clipped == 0
     assert np.max(np.abs(motor)) > 1e-6
-    assert not np.array_equal(remixed_motor, motor)
+    assert np.max(np.abs(quiet_motor - motor)) > 1e-6
+    assert np.array_equal(quiet_ped, ped)
+    assert np.array_equal(quiet_ambient, ambient)
+    np.testing.assert_allclose(quiet_motor, gain * motor, rtol=1e-5, atol=1e-9)
     np.testing.assert_allclose(remixed_raw, (raw - motor) + gain * motor, rtol=1e-5, atol=1e-8)
 
 
@@ -325,29 +329,10 @@ def test_stems_add_back_to_the_pre_clip_mix_across_a_clipped_block() -> None:
     assert np.max(np.abs(ambient)) > 0.0
     assert np.array_equal(ped + ambient + motor, _pre_clip_mix(blocks))
     assert np.array_equal(raw, np.clip(ped + ambient + motor, -1.0, 1.0))
+    assert not np.array_equal(raw - motor, ped + ambient)
+    assert not np.array_equal((raw - motor) + motor, _pre_clip_mix(blocks))
     assert np.array_equal(ped, quiet_ped)
     assert np.array_equal(ambient, quiet_ambient)
-
-
-def test_pedestrian_stem_survives_the_clipping_that_breaks_raw_minus_motor() -> None:
-    blocks = 2
-    raw, ped, ambient, motor, clipped = _saturating_scenario(blocks)
-    assert clipped > 0
-    assert not np.array_equal(raw - motor, ped + ambient)
-    assert np.array_equal(ped + ambient + motor, _pre_clip_mix(blocks))
-    assert not np.array_equal((raw - motor) + motor, _pre_clip_mix(blocks))
-
-
-def test_pedestrian_stem_does_not_move_when_only_the_drivetrain_level_does() -> None:
-    attenuation_db = 6.0
-    quiet = {**_MOTOR_TUNING, TRIM_DB: _MOTOR_TUNING[TRIM_DB] - attenuation_db}
-    _, ped, ambient, motor, _ = _render_scenario(3, continuous_gain=0.02)
-    _, quiet_ped, quiet_ambient, quiet_motor, _ = _render_scenario(3, continuous_gain=0.02, tuning=quiet)
-    assert np.max(np.abs(motor)) > 1e-6
-    assert np.max(np.abs(quiet_motor - motor)) > 1e-6
-    assert np.array_equal(quiet_ped, ped)
-    assert np.array_equal(quiet_ambient, ambient)
-    np.testing.assert_allclose(quiet_motor, 10.0 ** (-attenuation_db / 20.0) * motor, rtol=1e-5, atol=1e-9)
 
 
 _STEM_BY_KIND = {"footstep": "pedestrian", "speech": "pedestrian", "music": "ambient", "alarm": "ambient", "motor": "motor"}

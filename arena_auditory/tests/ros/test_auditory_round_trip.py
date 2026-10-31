@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import math
 import time
 import uuid
@@ -18,15 +17,6 @@ def _ros_gate():
     pytest.importorskip("task_generator_msgs.msg")
     pytest.importorskip("tf2_ros")
     pytest.importorskip("visualization_msgs.msg")
-
-
-@pytest.fixture
-def loop():
-    event_loop = asyncio.new_event_loop()
-    try:
-        yield event_loop
-    finally:
-        event_loop.close()
 
 
 def _build(event_loop, node_cls, namespace: str, params: dict[str, object] | None = None):
@@ -280,7 +270,7 @@ def test_four_mic_array_renders_and_robot_hearing_hears_the_centroid(rclpy_conte
         sound_pub.publish(event)
         mic_ids = {f"array:jackal:{name}" for name in ("front_left", "front_right", "rear_left", "rear_right")}
         scene.spin_until(
-            lambda: bool(robot_events) and mic_ids.issubset({message.reception.listener_id for message in propagated}) and any(message.data and max(message.data) > 1e-3 for message in levels),
+            lambda: bool(robot_events) and (mic_ids | {"robot:jackal"}).issubset({message.reception.listener_id for message in propagated}) and any(message.data and max(message.data) > 1e-3 for message in levels),
             timeout_sec=15.0,
         )
 

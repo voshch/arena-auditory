@@ -1,6 +1,17 @@
 from __future__ import annotations
 
+import asyncio
+import importlib.util
+
 import pytest
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    if importlib.util.find_spec("arena_simulation_setup") is not None:
+        from arena_simulation_setup.testing import install_fake_assets
+
+        install_fake_assets()
+
 
 _ROS_SKIP_REASON = "ROS2 not discoverable: source install/setup.bash to enable"
 
@@ -52,3 +63,12 @@ def default_sounds():
     except KeyError as exc:
         pytest.skip(f"default sound assets do not resolve: {exc}")
     return library
+
+
+@pytest.fixture
+def loop():
+    event_loop = asyncio.new_event_loop()
+    try:
+        yield event_loop
+    finally:
+        event_loop.close()
