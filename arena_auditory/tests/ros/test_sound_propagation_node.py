@@ -656,7 +656,8 @@ def test_continuous_receptions_of_one_pass_arrive_together_stamped_at_listener_s
             state = _continuous(source_id, position=(2.0 + index, 1.0, 1.0))
             state.header.stamp.sec = 3
             propagation._on_continuous_source(state)
-        propagation._flush_continuous()
+        while propagation._pending_continuous:
+            propagation._flush_continuous()
         _spin_until(rclpy, [driver], lambda: len(heard) >= count)
         return list(heard)
 
