@@ -11,7 +11,7 @@ FS = 16000
 
 @pytest.fixture
 def waiter(rclpy_context):
-    for module in ("arena_auditory_msgs.msg", "arena_robots_msgs.msg", "task_generator_msgs.msg", "task_generator_msgs.action"):
+    for module in ("arena_auditory_msgs.msg", "arena_robots_msgs.msg", "arena_runtime_msgs.msg", "arena_runtime_msgs.action"):
         pytest.importorskip(module)
     from arena_auditory.dataset.wait_capture import CaptureWaiter
 
@@ -28,7 +28,7 @@ def waiter(rclpy_context):
 
 
 def _fleet(*names: str):
-    from task_generator_msgs.msg import RobotFleet, RobotState
+    from arena_runtime_msgs.msg import RobotFleet, RobotState
 
     fleet = RobotFleet()
     for name in names:
@@ -39,7 +39,7 @@ def _fleet(*names: str):
 
 
 def _episode(state: int, info: str = ""):
-    from task_generator_msgs.msg import EpisodeRecord
+    from arena_runtime_msgs.msg import EpisodeRecord
 
     msg = EpisodeRecord()
     msg.outcome_state = state
@@ -49,7 +49,7 @@ def _episode(state: int, info: str = ""):
 
 
 def _running():
-    from task_generator_msgs.msg import EpisodeRecord
+    from arena_runtime_msgs.msg import EpisodeRecord
 
     return _episode(EpisodeRecord.RUNNING)
 
@@ -145,7 +145,7 @@ def test_an_invalid_frame_stops_the_capture_with_an_error(waiter, given: dict, m
 
 @pytest.mark.parametrize("state", ["SUCCESS", "FAILED", "SKIPPED", "FATAL"])
 def test_episode_ending_before_coverage_is_an_error(waiter, state: str) -> None:
-    from task_generator_msgs.msg import EpisodeRecord
+    from arena_runtime_msgs.msg import EpisodeRecord
 
     node = waiter()
     node._fleet(_fleet("r0"))
@@ -158,7 +158,7 @@ def test_episode_ending_before_coverage_is_an_error(waiter, state: str) -> None:
 
 
 def test_episode_ending_after_coverage_is_not_an_error(waiter) -> None:
-    from task_generator_msgs.msg import EpisodeRecord
+    from arena_runtime_msgs.msg import EpisodeRecord
 
     node = waiter(duration=1.0)
     node._fleet(_fleet("r0"))
@@ -170,7 +170,7 @@ def test_episode_ending_after_coverage_is_not_an_error(waiter) -> None:
 
 
 def test_action_capture_finishes_only_with_both_the_result_and_the_terminal_event(waiter) -> None:
-    from task_generator_msgs.msg import EpisodeRecord
+    from arena_runtime_msgs.msg import EpisodeRecord
 
     node = waiter(duration=1.0, run_episode_action="/arena/env_0/run_episode_unserved")
     node._fleet(_fleet("r0"))

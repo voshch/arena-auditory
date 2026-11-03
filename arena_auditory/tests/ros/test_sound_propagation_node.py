@@ -20,7 +20,7 @@ def _ros_gate():
     pytest.importorskip("arena_people_msgs.msg")
     pytest.importorskip("geometry_msgs.msg")
     pytest.importorskip("nav_msgs.msg")
-    pytest.importorskip("task_generator_msgs.msg")
+    pytest.importorskip("arena_runtime_msgs.msg")
 
 
 def _launch(parameters: dict[str, object] | None = None, cli_args: list[str] | None = None):
@@ -65,7 +65,7 @@ def _load_map(propagation, *, width: int = 20, height: int = 20, resolution: flo
 
 
 def _fleet(*names: str):
-    from task_generator_msgs.msg import RobotDescriptor, RobotFleet, RobotState
+    from arena_runtime_msgs.msg import RobotDescriptor, RobotFleet, RobotState
 
     fleet = RobotFleet()
     for name in names:

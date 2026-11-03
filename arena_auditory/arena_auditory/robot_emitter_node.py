@@ -15,13 +15,13 @@ from arena_rclpy_mixins.lazy import LazyPublisher
 from arena_rclpy_mixins.qos import best_effort, latched, reliable
 from arena_robots.audio import NS_PER_S
 from arena_robots.fleet import RobotBinding, robot_bindings
+from arena_runtime_msgs.msg import EpisodeRecord, RobotFleet
 from arena_simulation_setup.tree.assets.sound_catalog import WAV_MODELS, AgentKind, SoundAsset, SoundLibrary, Variant, selection_seed
 from builtin_interfaces.msg import Duration, Time
 from geometry_msgs.msg import Point
 from nav_msgs.msg import Odometry
 from rclpy.subscription import Subscription
 from std_msgs.msg import ColorRGBA
-from task_generator_msgs.msg import EpisodeRecord, RobotFleet
 from visualization_msgs.msg import Marker, MarkerArray
 
 from arena_auditory.constants import CONTINUOUS_AUDIO_SOURCES, STATE_EPISODE, STATE_ROBOTS, motor_markers

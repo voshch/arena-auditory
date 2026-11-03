@@ -20,7 +20,7 @@ SpawnMicrophoneTool::SpawnMicrophoneTool()
   shortcut_key_ = 'm';
 
   target_node_property_ = new rviz_common::properties::StringProperty(
-    "Target", "/task_generator_node",
+    "Target", "/arena_env_node",
     "Namespace providing the acoustic runtime/spawn_microphone service.",
     getPropertyContainer(), SLOT(updateClient()), this);
 

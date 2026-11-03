@@ -34,7 +34,7 @@ from arena_robots.audio import SPEED_OF_SOUND_MPS, ArrayStream, array_stream, db
 from arena_robots.fleet import RobotBinding, robot_bindings
 from arena_robots_msgs.msg import AudioFrame
 from arena_runtime.lockstep import register_channels
-from arena_runtime_msgs.msg import LockstepChannel
+from arena_runtime_msgs.msg import EpisodeRecord, LockstepChannel, RobotFleet
 from arena_simulation_setup.tree.assets.sound_catalog import AgentKind, SoundAsset, SoundLibrary, Variant
 from builtin_interfaces.msg import Time as TimeMsg
 from geometry_msgs.msg import Point
@@ -43,7 +43,6 @@ from rclpy.duration import Duration
 from rclpy.publisher import Publisher
 from rclpy.subscription import Subscription
 from std_msgs.msg import ColorRGBA, Float32MultiArray, Header, String
-from task_generator_msgs.msg import EpisodeRecord, RobotFleet
 from visualization_msgs.msg import Marker, MarkerArray
 
 from arena_auditory.assets import DecodedSample, SampleDecoder

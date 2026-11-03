@@ -17,7 +17,7 @@ rclpy = pytest.importorskip("rclpy")
 pytest.importorskip("arena_auditory_msgs.msg")
 pytest.importorskip("arena_robots_msgs.msg")
 pytest.importorskip("arena_runtime_msgs.msg")
-pytest.importorskip("task_generator_msgs.msg")
+pytest.importorskip("arena_runtime_msgs.msg")
 
 from arena_mcp.core import ROS, ToolError
 
@@ -93,9 +93,9 @@ def rig():
     from arena_runtime_msgs.msg import EnvRecord, EnvRegistry
     from nav_msgs.msg import OccupancyGrid
     from rclpy.executors import SingleThreadedExecutor
-    from task_generator_msgs.msg import RobotDescriptor, RobotFleet, RobotState
+    from arena_runtime_msgs.msg import RobotDescriptor, RobotFleet, RobotState
 
-    tg = f"/mcp_{uuid.uuid4().hex[:8]}/env_0/task_generator_node"
+    tg = f"/mcp_{uuid.uuid4().hex[:8]}/env_0/arena_env_node"
     propagation = _propagation(tg)
     peer = rclpy.create_node(f"acoustics_peer_{uuid.uuid4().hex[:8]}")
     publishers = {

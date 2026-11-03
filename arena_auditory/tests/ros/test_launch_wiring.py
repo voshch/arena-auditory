@@ -24,7 +24,7 @@ def _stack_nodes() -> dict:
     from launch_ros.actions import Node
 
     ctx = launch.LaunchContext()
-    ctx.launch_configurations.update({"namespace": "env7/task_generator_node", "env.ns": "env7"})
+    ctx.launch_configurations.update({"namespace": "env7/arena_env_node", "env.ns": "env7"})
     nodes: dict = {}
 
     def walk(entity) -> None:
@@ -68,7 +68,7 @@ def test_discrete_sound_events_share_the_sound_events_topic() -> None:
     from arena_auditory.constants import HEARD_SOUND_EVENTS, SOUND_EVENTS
 
     nodes = _stack_nodes()
-    assert _topic(nodes["human_emitter"], SOUND_EVENTS) == _topic(nodes["sound_propagation_node"], SOUND_EVENTS) == "/env7/task_generator_node/sound_events"
+    assert _topic(nodes["human_emitter"], SOUND_EVENTS) == _topic(nodes["sound_propagation_node"], SOUND_EVENTS) == "/env7/arena_env_node/sound_events"
     heard = _topic(nodes["sound_propagation_node"], HEARD_SOUND_EVENTS)
     for name in ("array_renderer", "listener_renderer", "robot_hearing_node"):
         assert _topic(nodes[name], HEARD_SOUND_EVENTS) == heard, name

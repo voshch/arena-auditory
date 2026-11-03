@@ -373,7 +373,7 @@ _RECORDED_AGENTS = [
     (99, 1, 4.0, 4.0, 0.0, 1.0, 0.0, 0.4, 0.0, "orca"),
     (13, 0, -0.5, 3.25, -1.5, -0.2, 0.1, 0.3, 1.0, ""),
 ]
-_STATES_TOPIC = "/arena/env_0/task_generator_node/agent_states"
+_STATES_TOPIC = "/arena/env_0/arena_env_node/agent_states"
 
 
 def _record_mcap(directory: Path, messages: list[tuple[str, str, object, int]]) -> Path:
@@ -410,7 +410,7 @@ def test_read_mcap_agent_states_and_agent_frame_layouts_export_identical_pedestr
         _record_mcap(
             tmp_path / "flat",
             [
-                ("/arena/env_0/task_generator_node/agent_meta", "arena_humansim_msgs/msg/AgentMeta", meta, 1),
+                ("/arena/env_0/arena_env_node/agent_meta", "arena_humansim_msgs/msg/AgentMeta", meta, 1),
                 (_STATES_TOPIC, "arena_humansim_msgs/msg/AgentFrame", flat, 2),
             ],
         )
@@ -440,7 +440,7 @@ def test_read_mcap_pairs_agent_frame_pedestrians_with_their_source_and_release_i
         _record_mcap(
             tmp_path / "flat",
             [
-                ("/arena/env_0/task_generator_node/agent_meta", "arena_humansim_msgs/msg/AgentMeta", meta, 1),
+                ("/arena/env_0/arena_env_node/agent_meta", "arena_humansim_msgs/msg/AgentMeta", meta, 1),
                 (_STATES_TOPIC, "arena_humansim_msgs/msg/AgentFrame", _attributed_frame(msgs), 2),
             ],
         )
@@ -498,7 +498,7 @@ def test_read_mcap_recorded_before_source_attribution_reads_empty_sources(tmp_pa
         writer = Writer(sink)
         meta_schema = writer.register_msgdef("arena_humansim_msgs/msg/AgentMeta", _AGENT_META_BEFORE_SOURCES + _HEADER_DEFINITION)
         frame_schema = writer.register_msgdef("arena_humansim_msgs/msg/AgentFrame", frame_definition + _HEADER_DEFINITION)
-        writer.write_message("/arena/env_0/task_generator_node/agent_meta", meta_schema, meta, log_time=1, publish_time=1)
+        writer.write_message("/arena/env_0/arena_env_node/agent_meta", meta_schema, meta, log_time=1, publish_time=1)
         writer.write_message(_STATES_TOPIC, frame_schema, frame, log_time=2, publish_time=2)
         writer.finish()
 

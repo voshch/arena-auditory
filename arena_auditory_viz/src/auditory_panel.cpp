@@ -191,16 +191,16 @@ namespace arena_auditory_viz
 
         QString result;
         if (config.mapGetString("Target", &result))
-            task_generator_node = normalizeNodePath(result.toStdString());
+            arena_env_node = normalizeNodePath(result.toStdString());
         else
-            task_generator_node = "/task_generator_node";
+            arena_env_node = "/arena_env_node";
 
         array_renderer_node = normalizeNodePath(
-            task_generator_node + "/array_renderer");
+            arena_env_node + "/array_renderer");
         listener_renderer_node = normalizeNodePath(
-            task_generator_node + "/listener_renderer");
+            arena_env_node + "/listener_renderer");
         propagation_node = normalizeNodePath(
-            task_generator_node + "/sound_propagation_node");
+            arena_env_node + "/sound_propagation_node");
 
         array_renderer_parameters_client =
             std::make_shared<rclcpp::AsyncParametersClient>(
@@ -215,20 +215,20 @@ namespace arena_auditory_viz
                 node,
                 propagation_node);
         set_semantic_client =
-            node->create_client<task_generator_msgs::srv::SetSemantic>(
-                task_generator_node + "/semantics/set");
+            node->create_client<arena_runtime_msgs::srv::SetSemantic>(
+                arena_env_node + "/semantics/set");
         remove_microphone_client =
             node->create_client<arena_auditory_msgs::srv::RemoveMicrophone>(
-                task_generator_node + "/runtime/remove_microphone");
+                arena_env_node + "/runtime/remove_microphone");
         remove_sound_client =
-            node->create_client<task_generator_msgs::srv::RemoveSound>(
-                task_generator_node + "/runtime/remove_sound");
+            node->create_client<arena_runtime_msgs::srv::RemoveSound>(
+                arena_env_node + "/runtime/remove_sound");
         {
             rclcpp::QoS qos(rclcpp::KeepLast(1));
             qos.transient_local();
             microphone_listeners_sub =
                 node->create_subscription<std_msgs::msg::String>(
-                    task_generator_node + "/microphone_listeners",
+                    arena_env_node + "/microphone_listeners",
                     qos,
                     [this](const std_msgs::msg::String::SharedPtr msg)
                     {
@@ -243,11 +243,11 @@ namespace arena_auditory_viz
             rclcpp::QoS qos(rclcpp::KeepLast(1));
             qos.transient_local();
             semantic_snapshot_sub = node->create_subscription<
-                task_generator_msgs::msg::SemanticSnapshot>(
-                task_generator_node + "/state/semantics",
+                arena_runtime_msgs::msg::SemanticSnapshot>(
+                arena_env_node + "/state/semantics",
                 qos,
                 [this](
-                    const task_generator_msgs::msg::SemanticSnapshot::SharedPtr msg)
+                    const arena_runtime_msgs::msg::SemanticSnapshot::SharedPtr msg)
                 {
                     QMetaObject::invokeMethod(
                         this,
@@ -320,10 +320,10 @@ namespace arena_auditory_viz
         {
             rclcpp::QoS qos(rclcpp::KeepLast(1));
             qos.transient_local();
-            episode_sub = node->create_subscription<task_generator_msgs::msg::EpisodeRecord>(
-                task_generator_node + "/state/episode",
+            episode_sub = node->create_subscription<arena_runtime_msgs::msg::EpisodeRecord>(
+                arena_env_node + "/state/episode",
                 qos,
-                [this](const task_generator_msgs::msg::EpisodeRecord::SharedPtr)
+                [this](const arena_runtime_msgs::msg::EpisodeRecord::SharedPtr)
                 {
                     QMetaObject::invokeMethod(this, [this]()
                     {
@@ -1159,11 +1159,11 @@ namespace arena_auditory_viz
         const std::string entity =
             items.front()->data(0, Qt::UserRole).toString().toStdString();
         auto request = std::make_shared<
-            task_generator_msgs::srv::RemoveSound::Request>();
+            arena_runtime_msgs::srv::RemoveSound::Request>();
         request->entity = entity;
         remove_sound_client->async_send_request(
             request,
-            [this, entity]( rclcpp::Client<task_generator_msgs::srv::RemoveSound>::SharedFuture future)
+            [this, entity]( rclcpp::Client<arena_runtime_msgs::srv::RemoveSound>::SharedFuture future)
             {
                 try
                 {
@@ -1199,14 +1199,14 @@ namespace arena_auditory_viz
             return;
         }
         auto request =
-            std::make_shared<task_generator_msgs::srv::SetSemantic::Request>();
+            std::make_shared<arena_runtime_msgs::srv::SetSemantic::Request>();
         request->entity = entity;
         request->field = "sounding";
         request->value = sounding ? "true" : "false";
         set_semantic_client->async_send_request(
             request,
             [this, entity](
-                rclcpp::Client<task_generator_msgs::srv::SetSemantic>::SharedFuture
+                rclcpp::Client<arena_runtime_msgs::srv::SetSemantic>::SharedFuture
                     future)
             {
                 try

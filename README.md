@@ -46,7 +46,7 @@ arena_auditory/                 this repository
 ## Nodes
 
 `arena_auditory.launch.py` starts these nodes below the task generator node of
-the env (`/arena/env_0/task_generator_node/<node>` for env 0):
+the env (`/arena/env_0/arena_env_node/<node>` for env 0):
 
 | Node | Executable | Role |
 |---|---|---|
@@ -101,10 +101,10 @@ The two renderers share one executable. These defaults depend on `render.role`:
 Parameters the RViz panel drives are live, for example:
 
 ```bash
-ros2 param set /arena/env_0/task_generator_node/array_renderer array.muted true
-ros2 param set /arena/env_0/task_generator_node/array_renderer monitor.solo front_left
-ros2 param set /arena/env_0/task_generator_node/listener_renderer listener.id microphone:runtime:1
-ros2 param set /arena/env_0/task_generator_node/sound_propagation_node propagation.enabled false
+ros2 param set /arena/env_0/arena_env_node/array_renderer array.muted true
+ros2 param set /arena/env_0/arena_env_node/array_renderer monitor.solo front_left
+ros2 param set /arena/env_0/arena_env_node/listener_renderer listener.id microphone:runtime:1
+ros2 param set /arena/env_0/arena_env_node/sound_propagation_node propagation.enabled false
 ```
 
 ## Launch arguments
@@ -164,7 +164,7 @@ with a deprecation warning, see
 The audio signal `AudioFrame` (interleaved float32 PCM with channel names,
 frames, positions and yaws) and `SoundDetection` (bearing, level and kind of a
 detected sound) are in `arena_robots_msgs`. The runtime sound services
-`SpawnSound` and `RemoveSound` are in `task_generator_msgs`, served by the
+`SpawnSound` and `RemoveSound` are in `arena_runtime_msgs`, served by the
 task generator's sounds module.
 
 ## Topics
@@ -382,8 +382,9 @@ A kind's `stem` names the renderer stem its sources land in, see
 
 ## World and launch-defined sounds
 
-The `sounds` task module is added to `task.modules` whenever `acoustics` is not
-`none` or `auditory.static_sounds` is non-empty. It renders every `sound`
+The `task_generator` task runtime runs the `sounds` task module whenever
+`acoustics` is not `none` or `auditory.static_sounds` is non-empty, whatever
+`task.modules` lists. It renders every `sound`
 entity declared in the loaded world, the active scenario and the launch
 configuration.
 
@@ -427,8 +428,8 @@ asset's level, which is also what a timeline `when:` on its `volume_db` reads.
 Toggle a sound from a scenario timeline or live:
 
 ```bash
-ros2 service call /arena/env_0/task_generator_node/semantics/set \
-  task_generator_msgs/srv/SetSemantic \
+ros2 service call /arena/env_0/arena_env_node/semantics/set \
+  arena_runtime_msgs/srv/SetSemantic \
   "{entity: env_0/lobby_radio/1, field: sounding, value: 'true'}"
 ```
 
@@ -523,7 +524,7 @@ backend declares them in its viz manifest (`rviz_plugins` in `api.py`), so
 env.
 
 **AuditoryPanel** (`arena_auditory_viz::AuditoryPanel`, config key `Target`,
-default `/task_generator_node`) talks to `<Target>/array_renderer`,
+default `/arena_env_node`) talks to `<Target>/array_renderer`,
 `<Target>/listener_renderer` and `<Target>/sound_propagation_node`:
 
 | Control | Parameter |
