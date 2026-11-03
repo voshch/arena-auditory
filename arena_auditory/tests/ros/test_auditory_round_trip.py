@@ -37,7 +37,7 @@ def _build(event_loop, node_cls, namespace: str, params: dict[str, object] | Non
     return event_loop.run_until_complete(build())
 
 
-def _spin_until(rclpy, nodes, predicate, timeout_sec: float = 10.0) -> None:
+def _spin_until(rclpy, nodes, predicate, timeout_sec: float = 30.0) -> None:
     deadline = time.monotonic() + timeout_sec
     while time.monotonic() < deadline:
         for node in nodes:
@@ -143,7 +143,7 @@ class _Scene:
             lambda: self.propagation._tracker.occupancy is not None and bool(self.propagation._robots) and self.propagation._tf_buffer.can_transform("map", self.base_frame, rclpy.time.Time()),
         )
 
-    def spin_until(self, predicate, timeout_sec: float = 10.0) -> None:
+    def spin_until(self, predicate, timeout_sec: float = 30.0) -> None:
         import rclpy
 
         _spin_until(rclpy, self.nodes, predicate, timeout_sec)

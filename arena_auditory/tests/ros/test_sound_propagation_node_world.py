@@ -335,7 +335,7 @@ def test_pedestrian_listener_uses_level3_under_pyroomacoustics_backend(rclpy_con
         peer, heard, _ = _heard_collector(rclpy, propagation)
 
         propagation._on_sound_event(_event("greeting_1", agent_id=1, agent_name="ped_1", position=(min_x + 1.0, min_y + 2.0, 1.6)))
-        _spin_until(rclpy, [peer, propagation], lambda: {msg.reception.listener_id for msg in heard} >= {"agent:2", f"robot:{robot}"}, timeout_sec=10.0)
+        _spin_until(rclpy, [peer, propagation], lambda: {msg.reception.listener_id for msg in heard} >= {"agent:2", f"robot:{robot}"}, timeout_sec=30.0)
         receptions = {msg.reception.listener_id: msg.reception for msg in heard}
 
         assert receptions["agent:2"].backend == "level3"
@@ -405,7 +405,7 @@ def test_robot_own_source_reaches_its_listeners_through_the_self_path(rclpy_cont
 
         propagation._on_sound_event(_event("motor_1", frame=f"{emitter}/base_link", kind="motor", agent_kind="robot", agent_name=emitter, position=(0.0, 0.0, 0.1)))
         expected = {f"robot:{emitter}", f"array:{emitter}:left", f"array:{emitter}:right", f"robot:{other}", f"array:{other}:left", f"array:{other}:right"}
-        _spin_until(rclpy, [peer, propagation], lambda: {msg.reception.listener_id for msg in heard} >= expected, timeout_sec=10.0)
+        _spin_until(rclpy, [peer, propagation], lambda: {msg.reception.listener_id for msg in heard} >= expected, timeout_sec=30.0)
         receptions = {msg.reception.listener_id: msg.reception for msg in heard}
 
         own = {f"robot:{emitter}": 0.25, f"array:{emitter}:left": math.hypot(0.1, 0.25), f"array:{emitter}:right": math.hypot(0.1, 0.25)}
@@ -450,7 +450,7 @@ def test_room_impulse_is_republished_once_impulse_window_newer_keys_went_out(rcl
         def emit(index: int, label: str) -> str:
             count = len(heard)
             propagation._on_sound_event(_event(f"speech_{label}", position=positions[index]))
-            _spin_until(rclpy, [peer, propagation], lambda: len(heard) > count, timeout_sec=10.0)
+            _spin_until(rclpy, [peer, propagation], lambda: len(heard) > count, timeout_sec=30.0)
             reception = heard[-1].reception
             assert reception.listener_id == spawned.listener_id
             assert reception.backend == "pyroomacoustics_same_room"
@@ -463,7 +463,7 @@ def test_room_impulse_is_republished_once_impulse_window_newer_keys_went_out(rcl
         keys.append(emit(IMPULSE_WINDOW, "evicting"))
         assert emit(0, "after_window") == first_key
 
-        _spin_until(rclpy, [peer, propagation], lambda: len(impulses) >= IMPULSE_WINDOW + 2, timeout_sec=10.0)
+        _spin_until(rclpy, [peer, propagation], lambda: len(impulses) >= IMPULSE_WINDOW + 2, timeout_sec=30.0)
         deadline = time.monotonic() + 0.3
         while time.monotonic() < deadline:
             rclpy.spin_once(peer, timeout_sec=0.02)

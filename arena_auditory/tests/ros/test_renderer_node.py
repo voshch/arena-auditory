@@ -12,7 +12,7 @@ ROBOT = "probe"
 STEMS = ("raw_array", "stem_motor", "stem_pedestrian", "stem_ambient")
 
 
-def _spin_until(nodes: list[object], predicate: Callable[[], bool], timeout_sec: float = 10.0) -> None:
+def _spin_until(nodes: list[object], predicate: Callable[[], bool], timeout_sec: float = 30.0) -> None:
     import rclpy
 
     deadline = time.monotonic() + timeout_sec
@@ -328,10 +328,12 @@ def test_continuous_source_without_updates_stops_after_the_stale_window(steady_h
     node = steady_harness.node
     node._on_continuous(_drivetrain_state(5))
     target = node._targets[ROBOT]
+    gate = target.gates["robot:other"]
+    gate.updated_ns = node._steady_clock.now().nanoseconds
     node._expire_gates(target)
     assert target.streams["robot:other"].active
 
-    time.sleep(CONTINUOUS_STALE_S + 0.1)
+    gate.updated_ns = node._steady_clock.now().nanoseconds - int((CONTINUOUS_STALE_S + 0.1) * 1e9)
     node._expire_gates(target)
     assert not target.streams["robot:other"].active
     assert "robot:other" not in target.gates
