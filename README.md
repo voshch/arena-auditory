@@ -568,7 +568,7 @@ map-frame bearings, the input of the `arena_hearing` belief node under
 `auditory.array.spec` to `four_mic`.
 
 ```bash
-export ARENA_WORLD_PATH=$ARENA_WS_DIR/src/Arena/_assets/arena-benchmarks-prod-public/suites/acoustics/worlds
+export ARENA_WORLD_PATH=$ARENA_DATA_DIR/assets/public/benchmarks/suites/acoustics/worlds
 arena launch sim:=gazebo robot:=jackal world:=acoustics_bend_narrow_O \
     task.robots:=scenario task.obstacles:=scenario \
     task.scenario.file:=hearing__world-acoustics_bend_narrow_O__robot-moving__pedestrians-1__ends-a-to-b \
