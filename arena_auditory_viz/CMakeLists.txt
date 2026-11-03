@@ -14,7 +14,7 @@ find_package(rviz_default_plugins REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(rcl_interfaces REQUIRED)
 find_package(arena_auditory_msgs REQUIRED)
-find_package(task_generator_msgs REQUIRED)
+find_package(arena_runtime_msgs REQUIRED)
 find_package(Qt5 REQUIRED COMPONENTS Widgets)
 
 set(CMAKE_AUTOMOC ON)
@@ -42,7 +42,7 @@ ament_target_dependencies(arena_auditory_viz
   geometry_msgs
   rcl_interfaces
   arena_auditory_msgs
-  task_generator_msgs
+  arena_runtime_msgs
 )
 target_link_libraries(arena_auditory_viz Qt5::Widgets)
 

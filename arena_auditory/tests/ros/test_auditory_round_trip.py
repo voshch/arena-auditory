@@ -14,7 +14,7 @@ def _ros_gate():
     pytest.importorskip("arena_people_msgs.msg")
     pytest.importorskip("geometry_msgs.msg")
     pytest.importorskip("nav_msgs.msg")
-    pytest.importorskip("task_generator_msgs.msg")
+    pytest.importorskip("arena_runtime_msgs.msg")
     pytest.importorskip("tf2_ros")
     pytest.importorskip("visualization_msgs.msg")
 
@@ -48,7 +48,7 @@ def _spin_until(rclpy, nodes, predicate, timeout_sec: float = 10.0) -> None:
 
 
 def _robot_fleet(robot_name: str, namespace: str, frame: str):
-    from task_generator_msgs.msg import RobotDescriptor, RobotFleet, RobotState
+    from arena_runtime_msgs.msg import RobotDescriptor, RobotFleet, RobotState
 
     robot = RobotDescriptor()
     robot.name = robot_name
@@ -110,7 +110,7 @@ class _Scene:
         import tf2_ros
         from arena_rclpy_mixins.qos import latched
         from nav_msgs.msg import OccupancyGrid
-        from task_generator_msgs.msg import RobotFleet
+        from arena_runtime_msgs.msg import RobotFleet
 
         from arena_auditory.sound_propagation_node import SoundPropagationNode
 

@@ -21,7 +21,7 @@ def _ros_gate():
     pytest.importorskip("arena_people_msgs.msg")
     pytest.importorskip("geometry_msgs.msg")
     pytest.importorskip("nav_msgs.msg")
-    pytest.importorskip("task_generator_msgs.msg")
+    pytest.importorskip("arena_runtime_msgs.msg")
 
 
 def _launch(parameters: dict[str, object] | None = None):
@@ -89,7 +89,7 @@ def _demo(rclpy, propagation):
 
 
 def _fleet(*names: str):
-    from task_generator_msgs.msg import RobotDescriptor, RobotFleet, RobotState
+    from arena_runtime_msgs.msg import RobotDescriptor, RobotFleet, RobotState
 
     fleet = RobotFleet()
     for name in names:
@@ -238,7 +238,7 @@ def test_spawn_microphone_assigns_zone_and_next_index(rclpy_context):
     import attrs
     import rclpy
     from arena_auditory.world import WorldMicrophoneSpec
-    from task_generator_msgs.msg import EpisodeRecord
+    from arena_runtime_msgs.msg import EpisodeRecord
 
     propagation = _launch({"propagation.backend": "legacy"})
     robot = _robot_name()

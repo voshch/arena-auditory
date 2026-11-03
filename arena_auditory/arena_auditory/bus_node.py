@@ -11,12 +11,12 @@ from arena_rclpy_mixins import ArenaMixinNode, qos
 from arena_rclpy_mixins.lazy import LazyPublisher
 from arena_robots.fleet import robot_bindings
 from arena_robots_msgs.msg import SoundDetection
+from arena_runtime_msgs.msg import RobotFleet
 from arena_simulation_setup.tree.assets.sound_catalog import AgentKind, SoundLibrary
 from rclpy.duration import Duration
 from rclpy.publisher import Publisher
 from rclpy.time import Time
 from std_msgs.msg import ColorRGBA, Header
-from task_generator_msgs.msg import RobotFleet
 from visualization_msgs.msg import Marker
 
 from arena_auditory.constants import BUS_FRONTEND, HEARD_SOUND_EVENTS, STATE_ROBOTS, detections, heard_sound, heard_sound_marker

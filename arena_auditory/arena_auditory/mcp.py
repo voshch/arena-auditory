@@ -148,7 +148,7 @@ async def acoustics_microphones(env_id: int | None = None) -> dict[str, Any]:
     node = await tg(env_id)
     msg = await ROS.latest(String, f"{node}/{MICROPHONE_LISTENERS}", qos=LATCHED, timeout=3.0, hint=NO_AUDITORY)
     selected = (await ROS.get_params(f"{node}/{PROPAGATION_NODE}", [ListenerGroup.ID.name]))[ListenerGroup.ID.name]
-    return {"task_generator": node, "selected": selected or None, "listeners": [_listener(listener_id) for listener_id in json.loads(msg.data)]}
+    return {"env": node, "selected": selected or None, "listeners": [_listener(listener_id) for listener_id in json.loads(msg.data)]}
 
 
 @domain.tool()

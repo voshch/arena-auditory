@@ -8,10 +8,10 @@
 #include <rviz_common/ros_integration/ros_node_abstraction_iface.hpp>
 
 #include "arena_auditory_msgs/srv/remove_microphone.hpp"
-#include "task_generator_msgs/srv/remove_sound.hpp"
-#include "task_generator_msgs/msg/episode_record.hpp"
-#include "task_generator_msgs/msg/semantic_snapshot.hpp"
-#include "task_generator_msgs/srv/set_semantic.hpp"
+#include "arena_runtime_msgs/srv/remove_sound.hpp"
+#include "arena_runtime_msgs/msg/episode_record.hpp"
+#include "arena_runtime_msgs/msg/semantic_snapshot.hpp"
+#include "arena_runtime_msgs/srv/set_semantic.hpp"
 
 #include <std_msgs/msg/string.hpp>
 #include <rcl_interfaces/msg/parameter_event.hpp>
@@ -86,7 +86,7 @@ protected:
     std::shared_ptr<rviz_common::ros_integration::RosNodeAbstractionIface> node_ptr;
     rclcpp::Node::SharedPtr node;
 
-    std::string task_generator_node;
+    std::string arena_env_node;
     std::string array_renderer_node;
     std::string listener_renderer_node;
     std::string propagation_node;
@@ -94,13 +94,13 @@ protected:
     std::shared_ptr<rclcpp::AsyncParametersClient> array_renderer_parameters_client;
     std::shared_ptr<rclcpp::AsyncParametersClient> listener_renderer_parameters_client;
     std::shared_ptr<rclcpp::AsyncParametersClient> propagation_parameters_client;
-    rclcpp::Client<task_generator_msgs::srv::SetSemantic>::SharedPtr set_semantic_client;
+    rclcpp::Client<arena_runtime_msgs::srv::SetSemantic>::SharedPtr set_semantic_client;
     rclcpp::Client<arena_auditory_msgs::srv::RemoveMicrophone>::SharedPtr remove_microphone_client;
-    rclcpp::Client<task_generator_msgs::srv::RemoveSound>::SharedPtr remove_sound_client;
+    rclcpp::Client<arena_runtime_msgs::srv::RemoveSound>::SharedPtr remove_sound_client;
 
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr microphone_listeners_sub;
-    rclcpp::Subscription<task_generator_msgs::msg::SemanticSnapshot>::SharedPtr semantic_snapshot_sub;
-    rclcpp::Subscription<task_generator_msgs::msg::EpisodeRecord>::SharedPtr episode_sub;
+    rclcpp::Subscription<arena_runtime_msgs::msg::SemanticSnapshot>::SharedPtr semantic_snapshot_sub;
+    rclcpp::Subscription<arena_runtime_msgs::msg::EpisodeRecord>::SharedPtr episode_sub;
     rclcpp::Subscription<rcl_interfaces::msg::ParameterEvent>::SharedPtr param_events_sub;
     std::string microphone_listener_registry_;
 

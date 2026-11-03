@@ -17,7 +17,7 @@
   <depend>rviz_default_plugins</depend>
   <depend>geometry_msgs</depend>
   <depend>arena_auditory_msgs</depend>
-  <depend>task_generator_msgs</depend>
+  <depend>arena_runtime_msgs</depend>
 
   <export>
     <build_type>ament_cmake</build_type>

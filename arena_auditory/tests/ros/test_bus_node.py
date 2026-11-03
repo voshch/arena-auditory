@@ -12,7 +12,7 @@ _spin_until = pytest.importorskip("arena_rclpy_mixins.testing").spin_until
 def _ros_gate():
     pytest.importorskip("rclpy")
     pytest.importorskip("arena_auditory_msgs.msg")
-    pytest.importorskip("task_generator_msgs.msg")
+    pytest.importorskip("arena_runtime_msgs.msg")
     pytest.importorskip("visualization_msgs.msg")
 
 
@@ -42,7 +42,7 @@ def _settle(rclpy, nodes, duration_sec: float = 0.3) -> None:
 
 
 def _robot_fleet(robot_name: str, namespace: str, frame: str):
-    from task_generator_msgs.msg import RobotDescriptor, RobotFleet, RobotState
+    from arena_runtime_msgs.msg import RobotDescriptor, RobotFleet, RobotState
 
     robot = RobotDescriptor()
     robot.name = robot_name

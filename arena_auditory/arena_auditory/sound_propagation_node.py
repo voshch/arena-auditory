@@ -31,11 +31,11 @@ from arena_rclpy_mixins.qos import best_effort, latched, reliable
 from arena_rclpy_mixins.transforms import ThreadedTransformListener
 from arena_robots.audio import NS_PER_S, ArraySpec, Vec3, load_array_spec
 from arena_robots.fleet import RobotBinding, robot_bindings
+from arena_runtime_msgs.msg import RobotFleet
 from arena_simulation_setup.tree.World import MICROPHONE_PLACEMENT_TOLERANCE_M
 from builtin_interfaces.msg import Time
 from geometry_msgs.msg import Point, PoseStamped, Transform
 from std_msgs.msg import ColorRGBA, Header, String
-from task_generator_msgs.msg import RobotFleet
 from visualization_msgs.msg import Marker, MarkerArray
 
 from arena_auditory.constants import (

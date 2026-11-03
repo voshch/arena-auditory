@@ -449,7 +449,7 @@ def _write_recording(path: Path, messages: list[tuple[str, str]]) -> None:
 
 def test_a_recording_without_a_render_trace_is_rejected(tmp_path: Path) -> None:
     path = tmp_path / "episode.mcap"
-    _write_recording(path, [("/arena/env_0/task_generator_node/state/world", "map_empty")])
+    _write_recording(path, [("/arena/env_0/arena_env_node/state/world", "map_empty")])
 
     with pytest.raises(ValueError, match="no render trace"):
         offline_render.read_episode_trace(path)
@@ -471,7 +471,7 @@ def _library_block(index: int) -> RenderInputs:
 @pytest.mark.usefixtures("default_sounds")
 def test_render_episode_writes_the_replayed_trace_beside_the_recording(tmp_path: Path) -> None:
     path = tmp_path / "episode.mcap"
-    topic = "/arena/env_0/task_generator_node/jackal/audio/diagnostics/render_inputs"
+    topic = "/arena/env_0/arena_env_node/jackal/audio/diagnostics/render_inputs"
     _write_recording(path, [(topic, render_inputs_to_json(_library_block(index))) for index in (4, 5, 6)])
 
     trace_read = offline_render.read_episode_trace(path)

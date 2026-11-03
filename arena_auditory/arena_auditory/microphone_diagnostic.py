@@ -8,7 +8,7 @@ from arena_rclpy_mixins.qos import latched, reliable
 from arena_robots.audio import ArrayStream, array_stream, dbfs_from_rms, gcc_phat, load_array_spec, rms
 from arena_robots.fleet import bind_robot
 from arena_robots_msgs.msg import AudioFrame
-from task_generator_msgs.msg import RobotFleet
+from arena_runtime_msgs.msg import RobotFleet
 
 from arena_auditory.constants import STATE_ROBOTS
 from arena_auditory.params import Configuration

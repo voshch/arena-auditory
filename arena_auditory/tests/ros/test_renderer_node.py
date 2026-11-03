@@ -25,7 +25,7 @@ def _spin_until(nodes: list[object], predicate: Callable[[], bool], timeout_sec:
 
 
 def _fleet(namespace: str) -> object:
-    from task_generator_msgs.msg import RobotDescriptor, RobotFleet, RobotState
+    from arena_runtime_msgs.msg import RobotDescriptor, RobotFleet, RobotState
 
     fleet = RobotFleet()
     fleet.robots.append(RobotState(descriptor=RobotDescriptor(name=ROBOT, model="jackal", ns=f"{namespace}/{ROBOT}", frame=ROBOT)))

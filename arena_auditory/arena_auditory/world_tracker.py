@@ -9,11 +9,11 @@ from concurrent.futures import Executor, Future, ThreadPoolExecutor
 
 from arena_rclpy_mixins.param_groups import configure
 from arena_rclpy_mixins.qos import latched
+from arena_runtime_msgs.msg import EpisodeRecord
 from arena_simulation_setup.tree.assets.sound_catalog import SoundLibrary
 from nav_msgs.msg import OccupancyGrid
 from rclpy.node import Node
 from std_msgs.msg import String
-from task_generator_msgs.msg import EpisodeRecord
 
 from arena_auditory.constants import MAP, STATE_EPISODE, STATE_WORLD
 from arena_auditory.params import Configuration
