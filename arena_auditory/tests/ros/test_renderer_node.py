@@ -322,6 +322,33 @@ def test_renderer_routes_each_source_to_the_stem_of_its_library_kind(steady_harn
     assert target.streams["robot:other"].stem == "motor"
 
 
+def test_the_ambient_bed_puts_one_loop_per_microphone_at_its_a_weighted_level(rclpy_context: object) -> None:
+    from arena_auditory.render.dsp import mems_gain
+    from arena_auditory.renderer_node import BED_SOURCE_ID
+    from arena_auditory.synthetic import a_weighted_rms, bed_key, bed_seed
+
+    harness = Harness(sim_time=False, extra={"render.bed.enabled": True, "render.bed.level_dba": 40.0})
+    try:
+        harness.node._on_fleet(_fleet(harness.namespace))
+        target = harness.node._targets[ROBOT]
+        voices = [target.continuous[(BED_SOURCE_ID, channel)] for channel in range(4)]
+        samples = [harness.node._samples[voice.asset_key] for voice in voices]
+
+        assert [voice.asset_key for voice in voices] == [bed_key(bed_seed(ROBOT), channel) for channel in range(4)]
+        assert all(voice.stem == "ambient" and voice.loop for voice in voices)
+        assert [voice.gain for voice in voices] == [mems_gain(40.0, a_weighted_rms(sample.samples, 16000)) for sample in samples]
+        harness.node._reset_voices()
+        assert (BED_SOURCE_ID, 0) in target.continuous
+    finally:
+        harness.close()
+
+
+def test_without_the_bed_the_array_carries_no_bed_voice(array_harness: Harness) -> None:
+    from arena_auditory.renderer_node import BED_SOURCE_ID
+
+    assert all(key[0] != BED_SOURCE_ID for key in array_harness.node._targets[ROBOT].continuous)
+
+
 def test_continuous_source_without_updates_stops_after_the_stale_window(steady_harness: Harness) -> None:
     from arena_auditory.renderer_node import CONTINUOUS_STALE_S
 
