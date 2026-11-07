@@ -409,7 +409,7 @@ class AcousticWorld:
         description = world_view.load()
         microphones = world_microphones(description, config.ceiling_height_m, level_origins=description.level_origins() if len(description.levels) > 1 else None)
         compacted, authored_origin = compact_authored_world(world_view, description, disk_map=config.map_source is MapSource.DISK)
-        rooms = AcousticRoomSpecBuilder(config.ceiling_height_m).from_world(compacted)
+        rooms = AcousticRoomSpecBuilder(config).from_world(compacted)
         graph = AcousticWorldGraph.from_world(compacted, rooms, config, description.kg if description.kg is not None else Scene())
         return cls(
             name=world,

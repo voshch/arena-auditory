@@ -19,7 +19,7 @@ PORTAL_CONFIG = configure(PortalConfig, PortalGroup)
 
 
 def _models(world: World | Level, semantics: Scene | None, config: WorldConfig = WORLD_CONFIG) -> tuple[AcousticScene, tuple[AcousticRoomSpec, ...], AcousticWorldGraph]:
-    rooms = AcousticRoomSpecBuilder(config.ceiling_height_m).from_world(world)
+    rooms = AcousticRoomSpecBuilder(config).from_world(world)
     graph = AcousticWorldGraph.from_world(world, rooms, config, semantics if semantics is not None else Scene())
     return AcousticScene.from_world(world, ceiling_height_m=config.ceiling_height_m), rooms, graph
 
@@ -64,25 +64,23 @@ def test_zone_lookup_prefers_exact_room_before_nearby_room() -> None:
     assert scene.zone_at_xy(-0.36, 0.5) is None
 
 
-def test_hospital_world_builds_rooms_and_portal_routes() -> None:
+def test_hospital_world_merges_the_open_corridors_and_keeps_door_portals() -> None:
     world = WorldIdentifier("hospital_1").resolve_sync().load()
 
     scene, rooms, graph = _models(world, world.kg)
 
-    assert len(scene.zones) == len(rooms) > 1
+    assert len(scene.zones) == 13
+    assert len(rooms) == 12
+    (corridor,) = [room for room in rooms if len(room.zone_names) > 1]
+    assert corridor.zone_names == ("central_hallway", "sub_hallway")
     assert scene.zone_at_xy(-1e-10, 0.0).name == "reception"
-    assert any(portal.connects("central_hallway", "reception") for portal in graph.portals)
-    opening = next(portal for portal in graph.portals if portal.connects("central_hallway", "sub_hallway"))
-    assert opening.portal_kind == "opening"
+    assert any(portal.connects(corridor.zone_name, "reception") for portal in graph.portals)
+    assert all(portal.portal_kind == "door" for portal in graph.portals)
     route = _route(graph, "operating_room", "waiting_area", max_hops=4)
     assert route is not None
-    assert route.zones == ("operating_room", "central_hallway", "sub_hallway", "waiting_area")
-    assert route.hop_count == 3
-    assert _route(graph, "operating_room", "waiting_area", max_hops=2) is None
-
-    _, _, doors_only = _models(world, world.kg, attrs.evolve(WORLD_CONFIG, openings_enabled=False))
-    assert not any(portal.connects("central_hallway", "sub_hallway") for portal in doors_only.portals)
-    assert _route(doors_only, "operating_room", "waiting_area", max_hops=12) is None
+    assert route.zones == ("operating_room", corridor.zone_name, "waiting_area")
+    assert route.hop_count == 2
+    assert _route(graph, "operating_room", "waiting_area", max_hops=1) is None
 
 
 def _write_world(root: Path, levels: list[dict]) -> WorldView:
@@ -95,12 +93,45 @@ def _box_zone(name: str, x_min: float, x_max: float) -> dict:
     return {"name": name, "polygon": [[x_min, 0.0], [x_max, 0.0], [x_max, 4.0], [x_min, 4.0]]}
 
 
+def _doorway_walls() -> list[dict]:
+    return [{"path": [[4.0, 0.0], [4.0, 1.5]]}, {"path": [[4.0, 2.5], [4.0, 4.0]]}]
+
+
+def test_zones_joined_across_a_wall_free_boundary_form_one_room(tmp_path: Path) -> None:
+    world_view = _write_world(tmp_path / "open", [{"id": "0", "zones": [_box_zone("lobby", 0.0, 4.0), _box_zone("hall", 4.0, 8.0)]}])
+    world = world_view.load()
+
+    _, rooms, graph = _models(world, world.kg)
+
+    (room,) = rooms
+    assert room.zone_name == "hall+lobby"
+    assert room.zone_names == ("hall", "lobby")
+    assert room.corners_xy == ((0.0, 0.0), (4.0, 0.0), (8.0, 0.0), (8.0, 4.0), (4.0, 4.0), (0.0, 4.0))
+    assert graph.portals == ()
+    assert graph.room("hall") == graph.room("lobby") == room
+
+
+def test_wall_gap_between_two_zones_is_an_opening_portal(tmp_path: Path) -> None:
+    world_view = _write_world(tmp_path / "walled", [{"id": "0", "zones": [_box_zone("lobby", 0.0, 4.0), _box_zone("hall", 4.0, 8.0)], "walls": _doorway_walls()}])
+    world = world_view.load()
+
+    _, rooms, graph = _models(world, world.kg)
+
+    assert sorted(room.zone_name for room in rooms) == ["hall", "lobby"]
+    (opening,) = graph.portals
+    assert opening.portal_kind == "opening"
+    assert sorted((opening.start, opening.end)) == [(4.0, 1.5), (4.0, 2.5)]
+
+    _, _, doors_only = _models(world, world.kg, attrs.evolve(WORLD_CONFIG, openings_enabled=False))
+    assert doors_only.portals == ()
+
+
 def test_compacted_two_level_world_builds_rooms_and_level_scoped_portals(tmp_path: Path) -> None:
     world_view = _write_world(
         tmp_path / "two_level",
         [
-            {"id": "0", "zones": [_box_zone("lobby", 0.0, 4.0), _box_zone("hall", 4.0, 8.0)]},
-            {"id": "1", "zones": [_box_zone("office", 0.0, 4.0), _box_zone("store", 4.0, 8.0)]},
+            {"id": "0", "zones": [_box_zone("lobby", 0.0, 4.0), _box_zone("hall", 4.0, 8.0)], "walls": _doorway_walls()},
+            {"id": "1", "zones": [_box_zone("office", 0.0, 4.0), _box_zone("store", 4.0, 8.0)], "walls": _doorway_walls()},
         ],
     )
     description = world_view.load()

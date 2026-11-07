@@ -57,7 +57,7 @@ def audit_world_view(world_name: str, world_view: WorldView, *, stride_cells: in
         raise ValueError("stride_cells must be positive")
     world = world_view.load()
     config = configure(WorldConfig, WorldGroup, PortalGroup)
-    rooms = AcousticRoomSpecBuilder(config.ceiling_height_m).from_world(world)
+    rooms = AcousticRoomSpecBuilder(config).from_world(world)
     graph = AcousticWorldGraph.from_world(world, rooms, config, world.kg if world.kg is not None else Scene())
 
     overlaps: list[tuple[str, str]] = []

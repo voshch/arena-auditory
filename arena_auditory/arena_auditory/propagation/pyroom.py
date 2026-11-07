@@ -33,12 +33,16 @@ from arena_auditory.propagation.pyroom_adapter import (
     RoomImpulseResponse,
     direct_arrival,
 )
-from arena_auditory.rooms import AcousticPortalRoute
+from arena_auditory.rooms import AcousticPortalRoute, AcousticRoomSpec
 from arena_auditory.world import AcousticWorld
 
 SAME_ROOM = "pyroomacoustics_same_room"
 ONE_DOOR = "pyroomacoustics_one_door"
 MULTI_PORTAL = "pyroomacoustics_multi_portal"
+
+
+def _same_room(first: AcousticRoomSpec | None, second: AcousticRoomSpec | None) -> bool:
+    return first is not None and second is not None and first.zone_name == second.zone_name
 
 
 class PyroomBackend:
@@ -79,31 +83,32 @@ class PyroomBackend:
                 yield listener, BackendUnavailable("source_outside_acoustic_zones")
             return
         listener_zones = [world.zone_at(listener.position[0], listener.position[1]) for listener in listeners]
-        same_room = [index for index, zone in enumerate(listener_zones) if zone is not None and zone.name == source_zone.name]
+        listener_rooms = [world.room(zone.name) if zone is not None else None for zone in listener_zones]
         room = world.room(source_zone.name)
+        same_room = [index for index, listener_room in enumerate(listener_rooms) if _same_room(room, listener_room)]
         rirs: dict[int, RoomImpulseResponse | RirUnavailable] = {}
         for index, (listener, listener_zone) in enumerate(zip(listeners, listener_zones, strict=True)):
             if listener_zone is None:
                 yield listener, BackendUnavailable("listener_outside_acoustic_zones")
                 continue
-            if listener_zone.name != source_zone.name:
-                try:
-                    outcome: Reception | BackendUnavailable = self._coupled(emission, listener, scene, world, coupler, source_zone.name, listener_zone.name)
-                except BackendUnavailable as exc:
-                    outcome = exc
-                yield listener, outcome
+            if room is not None and _same_room(room, listener_rooms[index]):
+                if not rirs:
+                    positions = [listeners[member].position for member in same_room]
+                    rirs = dict(zip(same_room, self._adapter.compute_rirs(room, source_position_m=source, listener_positions_m=positions), strict=True))
+                rir = rirs[index]
+                if isinstance(rir, RirUnavailable):
+                    yield listener, BackendUnavailable("same_room_rir_unavailable", f"no same-room RIR for {emission.agent_name}->{listener.id} in {room.zone_name!r}: {rir}")
+                    continue
+                yield listener, self._reception(emission, listener, scene, world, rir, zones=(source_zone.name, listener_zone.name), coupling=None)
                 continue
-            if room is None:
+            if room is None and listener_zone.name == source_zone.name:
                 yield listener, BackendUnavailable("same_zone_has_no_room_spec")
                 continue
-            if not rirs:
-                positions = [listeners[member].position for member in same_room]
-                rirs = dict(zip(same_room, self._adapter.compute_rirs(room, source_position_m=source, listener_positions_m=positions), strict=True))
-            rir = rirs[index]
-            if isinstance(rir, RirUnavailable):
-                yield listener, BackendUnavailable("same_room_rir_unavailable", f"no same-room RIR for {emission.agent_name}->{listener.id} in {room.zone_name!r}: {rir}")
-                continue
-            yield listener, self._reception(emission, listener, scene, world, rir, zones=(room.zone_name, room.zone_name), coupling=None)
+            try:
+                outcome: Reception | BackendUnavailable = self._coupled(emission, listener, scene, world, coupler, source_zone.name, listener_zone.name)
+            except BackendUnavailable as exc:
+                outcome = exc
+            yield listener, outcome
 
     def _coupled(
         self,

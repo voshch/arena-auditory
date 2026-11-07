@@ -4,17 +4,20 @@ import math
 from pathlib import Path
 
 import attrs
+import numpy as np
 import pytest
 from arena_rclpy_mixins.param_groups import configure
+from arena_simulation_setup.kg import Scene
 from arena_simulation_setup.tree.assets.sound_catalog import AgentKind
+from arena_simulation_setup.tree.World import parse_world
 from shapely.geometry import Polygon
 
 from arena_auditory.materials import AcousticMaterialCatalog
 from arena_auditory.params import BackendName, Level3Group, PortalGroup, PropagationGroup, RirGroup, WorldGroup
 from arena_auditory.propagation import Emission, Listener, PortalConfig, PropagationConfig, PropagationScene, RirCache, RirConfig
-from arena_auditory.propagation.pyroom import PyroomBackend
+from arena_auditory.propagation.pyroom import SAME_ROOM, PyroomBackend
 from arena_auditory.propagation.pyroom_adapter import PyroomacousticsAdapter, direct_arrival
-from arena_auditory.rooms import AcousticBoundarySpec, AcousticRoomSpec, AcousticWorldGraph
+from arena_auditory.rooms import AcousticBoundarySpec, AcousticRoomSpec, AcousticRoomSpecBuilder, AcousticWorldGraph
 from arena_auditory.shared import ListenerId
 from arena_auditory.world import AcousticScene, AcousticWorld, AcousticZone, WorldConfig
 
@@ -99,3 +102,49 @@ def test_direct_hidden_behind_a_room_corner_is_located_in_the_impulse() -> None:
     assert hidden.direct is None
     assert direct_arrival(hidden).amplitude > 0.0
     assert visible.direct is not None
+
+
+SEAM_SOURCE = (2.0, 3.0, 1.2)
+SEAM_ARRAY = (4.75, 4.15, 0.35)
+SEAM_MIC_OFFSETS = ((0.15, 0.0), (0.0, 0.15), (-0.15, 0.0), (0.0, -0.15))
+
+
+def _zones_world(*zones: dict) -> AcousticWorld:
+    level = parse_world({"format": "arena-world/2", "levels": [{"id": "0", "zones": list(zones)}]}).levels["0"]
+    config = configure(WorldConfig, WorldGroup, PortalGroup)
+    rooms = AcousticRoomSpecBuilder(config).from_world(level)
+    return AcousticWorld(
+        name="seam",
+        path=Path(),
+        config=config,
+        scene=AcousticScene.from_world(level, ceiling_height_m=config.ceiling_height_m),
+        rooms=rooms,
+        graph=AcousticWorldGraph.from_world(level, rooms, config, Scene()),
+        microphones=(),
+        authored_origin=None,
+    )
+
+
+def _array_bearing(world: AcousticWorld, backend: PyroomBackend) -> tuple[float, tuple[str, ...]]:
+    listeners = [Listener.at(ListenerId.runtime_mic(index), (SEAM_ARRAY[0] + dx, SEAM_ARRAY[1] + dy, SEAM_ARRAY[2])) for index, (dx, dy) in enumerate(SEAM_MIC_OFFSETS, start=1)]
+    emission = Emission(source_id="ped/voice", agent_kind=AgentKind.PEDESTRIAN, agent_name="ped_1", position=SEAM_SOURCE, level_db=60.0)
+    receptions = [reception for _, reception in backend.propagate_many(emission, listeners, PropagationScene(world=world))]
+    design = np.asarray([[1.0, dx, dy] for dx, dy in SEAM_MIC_OFFSETS])
+    (_, slope_x, slope_y), *_ = np.linalg.lstsq(design, np.asarray([reception.direct_delay_s for reception in receptions]), rcond=None)
+    return math.atan2(-slope_y, -slope_x), tuple(reception.backend for reception in receptions)
+
+
+def test_microphone_array_near_a_zone_seam_reads_the_source_bearing() -> None:
+    backend = _backend()
+    split = _zones_world({"name": "left", "polygon": [[0.0, 0.0], [4.0, 0.0], [4.0, 6.0], [0.0, 6.0]]}, {"name": "right", "polygon": [[4.0, 0.0], [8.0, 0.0], [8.0, 6.0], [4.0, 6.0]]})
+    whole = _zones_world({"name": "room", "polygon": [[0.0, 0.0], [8.0, 0.0], [8.0, 6.0], [0.0, 6.0]]})
+
+    seam_bearing, seam_backends = _array_bearing(split, backend)
+    whole_bearing, whole_backends = _array_bearing(whole, backend)
+    truth = math.atan2(SEAM_SOURCE[1] - SEAM_ARRAY[1], SEAM_SOURCE[0] - SEAM_ARRAY[0])
+
+    print(f"\nbearing over the seam {math.degrees(seam_bearing):+.1f} deg, in the whole room {math.degrees(whole_bearing):+.1f} deg, truth {math.degrees(truth):+.1f} deg")
+    assert seam_backends == (SAME_ROOM,) * len(SEAM_MIC_OFFSETS)
+    assert whole_backends == (SAME_ROOM,) * len(SEAM_MIC_OFFSETS)
+    assert abs(math.degrees(seam_bearing - truth)) <= 5.0
+    assert abs(math.degrees(seam_bearing - whole_bearing)) <= 1.0

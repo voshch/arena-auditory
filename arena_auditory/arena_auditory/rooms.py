@@ -12,9 +12,9 @@ import attrs
 from arena_simulation_setup.tree.assets.Material import MaterialIdentifier
 from arena_simulation_setup.tree.World import Level, World, Zone, connections, zones_of
 from shapely.geometry import LineString, Point, Polygon
-from shapely.geometry.base import BaseMultipartGeometry
+from shapely.geometry.base import BaseGeometry, BaseMultipartGeometry
 from shapely.geometry.polygon import orient
-from shapely.ops import nearest_points
+from shapely.ops import nearest_points, unary_union
 
 if TYPE_CHECKING:
     from arena_simulation_setup.kg import Scene
@@ -69,6 +69,7 @@ class AcousticRoomSpec:
     floor_material_id: str
     ceiling_material_id: str
     ceiling_height_m: float
+    zone_names: tuple[str, ...] = attrs.field(default=attrs.Factory(lambda room: (room.zone_name,), takes_self=True))
 
     @property
     def corners_xy(self) -> tuple[Point2D, ...]:
@@ -390,12 +391,28 @@ def _validate_spec(
             raise ValueError(f"room {spec.zone_name!r} contains an empty material ID")
 
 
+SeamKind = Literal["open", "walled", "none"]
+
+
+def _shared_boundary(first: Polygon, second: Polygon, walled: BaseGeometry, config: WorldConfig) -> SeamKind:
+    """Whether the two zones share a boundary of real width, and whether a wall or door stands on it."""
+    shared = False
+    for polygon, other in ((first, second), (second, first)):
+        contact = polygon.boundary.intersection(other.boundary)
+        if contact.length < config.min_opening_width_m:
+            continue
+        if not walled.is_empty and contact.buffer(GEOMETRY_TOLERANCE_M).intersection(walled).length >= config.min_opening_width_m:
+            return "walled"
+        shared = True
+    return "open" if shared else "none"
+
+
 class AcousticRoomSpecBuilder:
     def __init__(
         self,
-        ceiling_height_m: float,
+        config: WorldConfig,
     ) -> None:
-        self._ceiling_height_m = ceiling_height_m
+        self._config = config
 
     def from_world(
         self,
@@ -405,8 +422,58 @@ class AcousticRoomSpecBuilder:
         for _, level in world_levels(world):
             walls = self._normalize_walls(level)
             doors = self._normalize_doors(level)
-            rooms.extend(self._from_zone(zone, walls, doors) for zone in level.zones)
+            polygons = {str(zone.name): _normalize_polygon(zone) for zone in level.zones}
+            zones = {str(zone.name): zone for zone in level.zones}
+            for zone_names, outline in self._seam_groups(polygons, walls, doors):
+                rooms.append(self._from_group(zone_names, outline, zones, walls, doors))
         return tuple(rooms)
+
+    def _seam_groups(self, polygons: dict[str, Polygon], level_walls: list[_SourceSegment], level_doors: list[_SourceSegment]) -> tuple[tuple[tuple[str, ...], Polygon], ...]:
+        """Zone names grouped into rooms whose outline is one ring without holes, each with its outline."""
+        walled = unary_union([LineString((segment.start, segment.end)) for segment in (*level_walls, *level_doors)])
+        names = list(polygons)
+
+        def key(first: str, second: str) -> tuple[str, str]:
+            return (first, second) if first < second else (second, first)
+
+        shared = {key(first, second): _shared_boundary(polygons[first], polygons[second], walled, self._config) for index, first in enumerate(names) for second in names[index + 1 :]}
+        parent = {name: name for name in names}
+        members: dict[str, tuple[list[str], Polygon]] = {name: ([name], polygons[name]) for name in names}
+
+        def find(name: str) -> str:
+            while parent[name] != name:
+                parent[name] = parent[parent[name]]
+                name = parent[name]
+            return name
+
+        for index, first in enumerate(names):
+            for second in names[index + 1 :]:
+                if shared[key(first, second)] != "open":
+                    continue
+                root_first, root_second = find(first), find(second)
+                if root_first == root_second:
+                    continue
+                left, left_outline = members[root_first]
+                right, right_outline = members[root_second]
+                if any(shared[key(held, other)] == "walled" for held in left for other in right if held != other):
+                    continue
+                outline = unary_union([left_outline, right_outline])
+                if not isinstance(outline, Polygon) or outline.interiors:
+                    continue
+                parent[root_second] = root_first
+                members[root_first] = (sorted((*left, *right)), outline)
+                del members[root_second]
+        return tuple((tuple(group), outline) for group, outline in members.values())
+
+    def _from_group(
+        self,
+        zone_names: tuple[str, ...],
+        outline: Polygon,
+        zones: dict[str, Zone],
+        level_walls: list[_SourceSegment],
+        level_doors: list[_SourceSegment],
+    ) -> AcousticRoomSpec:
+        return self._from_polygon(zone_names, outline if len(zone_names) == 1 else orient(outline, sign=1.0), zones, level_walls, level_doors)
 
     def _normalize_walls(self, level: Level) -> list[_SourceSegment]:
         return [
@@ -449,9 +516,14 @@ class AcousticRoomSpecBuilder:
             for door in level.doors
         ]
 
-    def _from_zone(self, zone: Zone, level_walls: list[_SourceSegment], level_doors: list[_SourceSegment]) -> AcousticRoomSpec:
-        polygon = _normalize_polygon(zone)
-
+    def _from_polygon(
+        self,
+        zone_names: tuple[str, ...],
+        polygon: Polygon,
+        zones: dict[str, Zone],
+        level_walls: list[_SourceSegment],
+        level_doors: list[_SourceSegment],
+    ) -> AcousticRoomSpec:
         corners = [(x, y) for x, y in list(polygon.exterior.coords)[:-1]]
 
         walls = _segments_near(level_walls, polygon)
@@ -471,19 +543,22 @@ class AcousticRoomSpecBuilder:
                 )
             )
 
+        members = [zones[name] for name in zone_names]
+
         floor_material_id = _material_name(
-            zone.floor,
+            members[0].floor,
             DEFAULT_FLOOR_MATERIAL_ID,
         )
 
-        ceiling_material_id = str(zone.ceiling.material.name).strip() if zone.ceiling is not None else ""
+        ceiling_material_id = str(members[0].ceiling.material.name).strip() if members[0].ceiling is not None else ""
 
         spec = AcousticRoomSpec(
-            zone_name=str(zone.name),
+            zone_name="+".join(zone_names),
+            zone_names=zone_names,
             boundary=tuple(boundary),
             floor_material_id=floor_material_id,
             ceiling_material_id=ceiling_material_id or OPENING_MATERIAL_ID,
-            ceiling_height_m=zone_ceiling_height(zone, self._ceiling_height_m),
+            ceiling_height_m=max(zone_ceiling_height(zone, self._config.ceiling_height_m) for zone in members),
         )
 
         _validate_spec(
@@ -605,7 +680,7 @@ class AcousticWorldGraph:
             )
             for zone in zones
         )
-        room_names = {room.zone_name for room in rooms}
+        room_of_zone = {zone: room.zone_name for room in rooms for zone in room.zone_names}
         door_zones: dict[str, list[tuple[str, str]]] = {}
         for zone_a, zone_b, door_name in connections(semantics):
             door_zones.setdefault(door_name, []).append((zone_a, zone_b))
@@ -634,7 +709,9 @@ class AcousticWorldGraph:
                     continue
 
                 for owner, neighbor in pairs:
-                    if owner not in room_names or neighbor not in room_names:
+                    room_owner = room_of_zone.get(owner, "")
+                    room_neighbor = room_of_zone.get(neighbor, "")
+                    if not room_owner or not room_neighbor:
                         unpaired.append(
                             UnpairedDoor(
                                 door_name=name,
@@ -645,21 +722,23 @@ class AcousticWorldGraph:
                             )
                         )
                         continue
+                    if room_owner == room_neighbor:
+                        continue
 
-                    ordered_zones = tuple(sorted((owner, neighbor)))
+                    ordered_rooms = tuple(sorted((room_owner, room_neighbor)))
                     endpoints = sorted((start, end))
                     geometry_key = tuple(round(v, 4) for point in endpoints for v in point)
-                    key = (ordered_zones[0], ordered_zones[1], geometry_key)
+                    key = (ordered_rooms[0], ordered_rooms[1], geometry_key)
                     if key in seen:
                         continue
                     seen.add(key)
 
                     portals.append(
                         AcousticPortal(
-                            portal_id=_safe_id(f"door:{name}:{ordered_zones[0]}:{ordered_zones[1]}"),
+                            portal_id=_safe_id(f"door:{name}:{ordered_rooms[0]}:{ordered_rooms[1]}"),
                             door_name=name,
-                            zone_a=owner,
-                            zone_b=neighbor,
+                            zone_a=room_owner,
+                            zone_b=room_neighbor,
                             start=start,
                             end=end,
                             height_m=max(float(door.height), 0.1),
@@ -671,20 +750,16 @@ class AcousticWorldGraph:
 
         if config.openings_enabled:
             room_by_name = {room.zone_name: room for room in rooms}
-            for index, (zone_a, polygon_a) in enumerate(polygons):
-                room_a = room_by_name.get(zone_a)
-                if room_a is None:
-                    continue
-                openings_a = [LineString((boundary.start, boundary.end)) for boundary in room_a.boundary if boundary.kind == "opening"]
-                for zone_b, polygon_b in polygons[index + 1 :]:
-                    if zone_levels.get(zone_b) != zone_levels.get(zone_a):
+            room_outlines = tuple((room.zone_name, Polygon(room.corners_xy)) for room in rooms)
+            room_levels = {room.zone_name: zone_levels[room.zone_names[0]] for room in rooms}
+            for index, (room_a, polygon_a) in enumerate(room_outlines):
+                openings_a = [LineString((boundary.start, boundary.end)) for boundary in room_by_name[room_a].boundary if boundary.kind == "opening"]
+                for room_b, polygon_b in room_outlines[index + 1 :]:
+                    if room_levels[room_b] != room_levels[room_a]:
                         continue
                     if polygon_a.boundary.distance(polygon_b.boundary) > config.adjacency_tolerance_m:
                         continue
-                    room_b = room_by_name.get(zone_b)
-                    if room_b is None:
-                        continue
-                    openings_b = [LineString((boundary.start, boundary.end)) for boundary in room_b.boundary if boundary.kind == "opening"]
+                    openings_b = [LineString((boundary.start, boundary.end)) for boundary in room_by_name[room_b].boundary if boundary.kind == "opening"]
                     for opening_a in openings_a:
                         for opening_b in openings_b:
                             shared = opening_a.intersection(opening_b)
@@ -696,31 +771,31 @@ class AcousticWorldGraph:
                                 (start_x, start_y), (end_x, end_y) = coordinates[0], coordinates[-1]
                                 start = (float(start_x), float(start_y))
                                 end = (float(end_x), float(end_y))
-                                ordered_zones = tuple(sorted((zone_a, zone_b)))
+                                ordered_rooms = tuple(sorted((room_a, room_b)))
                                 endpoints = sorted((start, end))
                                 geometry_key = tuple(round(value, 4) for point in endpoints for value in point)
                                 key = (
-                                    ordered_zones[0],
-                                    ordered_zones[1],
+                                    ordered_rooms[0],
+                                    ordered_rooms[1],
                                     geometry_key,
                                 )
                                 if key in seen:
                                     continue
                                 candidate_line = LineString((start, end))
-                                if any(portal.connects(zone_a, zone_b) and LineString((portal.start, portal.end)).distance(candidate_line) <= config.adjacency_tolerance_m and LineString((portal.start, portal.end)).intersection(candidate_line).length > 0.5 * candidate_line.length for portal in portals):
+                                if any(portal.connects(room_a, room_b) and LineString((portal.start, portal.end)).distance(candidate_line) <= config.adjacency_tolerance_m and LineString((portal.start, portal.end)).intersection(candidate_line).length > 0.5 * candidate_line.length for portal in portals):
                                     continue
                                 seen.add(key)
                                 portals.append(
                                     AcousticPortal(
-                                        portal_id=_safe_id(f"opening:{ordered_zones[0]}:{ordered_zones[1]}:" + ":".join(f"{value:.3f}" for value in geometry_key)),
+                                        portal_id=_safe_id(f"opening:{ordered_rooms[0]}:{ordered_rooms[1]}:" + ":".join(f"{value:.3f}" for value in geometry_key)),
                                         door_name="",
-                                        zone_a=zone_a,
-                                        zone_b=zone_b,
+                                        zone_a=room_a,
+                                        zone_b=room_b,
                                         start=start,
                                         end=end,
                                         height_m=min(
-                                            room_a.ceiling_height_m,
-                                            room_b.ceiling_height_m,
+                                            room_by_name[room_a].ceiling_height_m,
+                                            room_by_name[room_b].ceiling_height_m,
                                         ),
                                         material_id=OPENING_MATERIAL_ID,
                                         portal_kind="opening",
@@ -735,8 +810,9 @@ class AcousticWorldGraph:
             unpaired_doors=tuple(unpaired),
         )
 
-    def room(self, zone_name: str) -> AcousticRoomSpec | None:
-        return next((room for room in self.rooms if room.zone_name == zone_name), None)
+    def room(self, name: str) -> AcousticRoomSpec | None:
+        """The room a zone or room name belongs to."""
+        return next((room for room in self.rooms if room.zone_name == name or name in room.zone_names), None)
 
     def zone_at_xy(self, x: float, y: float) -> str | None:
         point = Point(float(x), float(y))
@@ -851,23 +927,18 @@ class AcousticWorldGraph:
     def position_inside_portal(
         self,
         portal: AcousticPortal,
-        zone_name: str,
+        name: str,
         *,
         inset_m: float,
         height_m: float,
     ) -> Position3D:
-        polygon = next(
-            (polygon for name, polygon in self.zone_polygons if name == zone_name),
-            None,
-        )
-        if polygon is None:
-            raise KeyError(f"unknown acoustic zone {zone_name!r}")
-
+        """A point inset from the room boundary on the portal's side of it."""
+        room = self.room(name)
+        if room is None:
+            raise KeyError(f"no acoustic room for {name!r}")
+        polygon = Polygon(room.corners_xy)
         center = Point(portal.center_xy)
         inner = polygon.buffer(-max(inset_m, 1e-4))
         xy = polygon.representative_point() if inner.is_empty else nearest_points(center, inner)[1]
-        room = self.room(zone_name)
-        if room is None:
-            raise KeyError(f"no acoustic room for zone {zone_name!r}")
         z = min(max(float(height_m), 0.01), room.ceiling_height_m - 0.01)
         return float(xy.x), float(xy.y), z

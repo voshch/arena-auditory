@@ -24,9 +24,9 @@ def test_audit_reports_coverage_and_portal_connectivity() -> None:
 
     assert airport.complete
     assert airport.sampled_traversable_cells > 0
-    assert hospital.rooms == 13
+    assert hospital.rooms == 12
     assert hospital.door_portals == 12
-    assert hospital.opening_portals == 1
+    assert hospital.opening_portals == 0
     assert hospital.connected_components == 1
 
 

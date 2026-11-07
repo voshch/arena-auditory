@@ -144,7 +144,7 @@ class AcousticPlotDashboard:
 
         selected_zones = set(snapshot.traversed_zones)
         selected_zones.update(zone for zone in (snapshot.source_zone, snapshot.listener_zone) if zone)
-        rooms = tuple(room for room in snapshot.room_specs if not selected_zones or room.zone_name in selected_zones)
+        rooms = tuple(room for room in snapshot.room_specs if not selected_zones or room.zone_name in selected_zones or not selected_zones.isdisjoint(room.zone_names))
         if not rooms:
             rooms = snapshot.room_specs
 
