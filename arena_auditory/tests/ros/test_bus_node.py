@@ -86,6 +86,18 @@ def _heard(listener_id: str, *, event_id: str = "human:1:bus", audible: bool = T
     return event
 
 
+def _continuous(listener_id: str, *, source_id: str = "caller:1", audible: bool = True, active: bool = True, received_db: float = 45.0, threshold_db: float = 20.0, agent_robot: str = ""):
+    from arena_auditory_msgs.msg import ContinuousHeardSoundState
+    from arena_simulation_setup.tree.assets.sound_catalog import AgentKind
+
+    event = _heard(listener_id, event_id=source_id, audible=audible, received_db=received_db, threshold_db=threshold_db)
+    if agent_robot:
+        event.source.agent_kind = AgentKind.ROBOT
+        event.source.agent_name = agent_robot
+    event.source.active = active
+    return ContinuousHeardSoundState(header=event.header, source=event.source, reception=event.reception)
+
+
 @pytest.fixture
 def bus(rclpy_context, loop):
     import rclpy
@@ -98,7 +110,7 @@ def bus(rclpy_context, loop):
 
     suffix = uuid.uuid4().hex[:8]
     namespace = f"/test_{suffix}"
-    node = _build(loop, BusNode, namespace, {"bus.delay.enabled": False})
+    node = _build(loop, BusNode, namespace, {"bus.delay.enabled": False, "bus.continuous.gap_s": 0.2})
     consumer = rclpy.create_node(f"bus_consumer_{suffix}", namespace=namespace)
     heard: list[HeardSoundEvent] = []
     found: list[SoundDetection] = []
@@ -157,6 +169,91 @@ def test_inaudible_weak_and_non_robot_receptions_are_dropped(bus) -> None:
     node._cb_heard(_heard("robot:jackal", event_id="below_snr", received_db=10.0, threshold_db=20.0))
     node._cb_heard(_heard("array:jackal:front_left", event_id="array_mic"))
     node._cb_heard(_heard("robot:other", event_id="unknown_robot"))
+    assert node._pending == []
+    _settle(rclpy, [node, consumer])
+    assert heard == []
+    assert found == []
+    assert markers == []
+
+
+def test_continuous_source_gives_one_detection_while_it_stays_audible(bus) -> None:
+    import rclpy
+
+    node, consumer, _suffix, heard, found, markers = bus
+    for _ in range(6):
+        node._cb_continuous(_continuous("robot:jackal"))
+        _settle(rclpy, [node, consumer], 0.03)
+    _spin_until(rclpy, [node, consumer], lambda: bool(heard and found and markers))
+    _settle(rclpy, [node, consumer])
+    assert len(heard) == 1
+    assert len(found) == 1
+    assert found[0].event_id == "caller:1"
+    assert found[0].robot == "jackal"
+    assert found[0].level_db == pytest.approx(45.0)
+    assert heard[0].source.id == "caller:1"
+
+
+def test_continuous_source_gives_a_second_detection_after_an_inaudible_state(bus) -> None:
+    import rclpy
+
+    node, consumer, _suffix, _heard_events, found, _markers = bus
+    node._cb_continuous(_continuous("robot:jackal"))
+    node._cb_continuous(_continuous("robot:jackal", audible=False, active=False))
+    node._cb_continuous(_continuous("robot:jackal"))
+    _spin_until(rclpy, [node, consumer], lambda: len(found) >= 2)
+    _settle(rclpy, [node, consumer])
+    assert len(found) == 2
+
+
+def test_continuous_source_gives_a_second_detection_after_the_stream_goes_silent(bus) -> None:
+    import rclpy
+
+    node, consumer, _suffix, _heard_events, found, _markers = bus
+    node._cb_continuous(_continuous("robot:jackal"))
+    _settle(rclpy, [node, consumer], 0.4)
+    node._cb_continuous(_continuous("robot:jackal"))
+    _spin_until(rclpy, [node, consumer], lambda: len(found) >= 2)
+    _settle(rclpy, [node, consumer])
+    assert len(found) == 2
+
+
+def test_continuous_sources_have_independent_edges_per_source_id(bus) -> None:
+    import rclpy
+
+    node, consumer, _suffix, _heard_events, found, _markers = bus
+    node._cb_continuous(_continuous("robot:jackal", source_id="caller:1"))
+    node._cb_continuous(_continuous("robot:jackal", source_id="caller:2"))
+    _spin_until(rclpy, [node, consumer], lambda: len(found) >= 2)
+    assert sorted(detection.event_id for detection in found) == ["caller:1", "caller:2"]
+
+
+def test_fleet_change_restarts_continuous_edges(bus) -> None:
+    import rclpy
+
+    node, consumer, suffix, _heard_events, found, _markers = bus
+    node._cb_continuous(_continuous("robot:jackal"))
+    node._cb_fleet(_robot_fleet("other", f"/test_{suffix}/other", f"other_{suffix}"))
+    node._cb_continuous(_continuous("robot:jackal"))
+    _spin_until(rclpy, [node, consumer], lambda: len(found) >= 2)
+    assert len(found) == 2
+
+
+def test_an_audible_environment_source_published_inactive_is_heard(bus) -> None:
+    node, *_ = bus
+    node._cb_continuous(_continuous("robot:jackal", source_id="environment:env_0/hall_siren/0", active=False))
+    assert len(node._pending) == 1
+
+
+def test_inaudible_weak_self_and_unknown_robot_continuous_states_are_dropped(bus) -> None:
+    import rclpy
+
+    node, consumer, _suffix, heard, found, markers = bus
+    node._cb_continuous(_continuous("robot:jackal", source_id="inaudible", audible=False))
+    node._cb_continuous(_continuous("robot:jackal", source_id="below_snr", received_db=10.0, threshold_db=20.0))
+    node._cb_continuous(_continuous("robot:jackal", source_id="stopped", audible=False, active=False))
+    node._cb_continuous(_continuous("robot:jackal", source_id="own_motor", agent_robot="jackal"))
+    node._cb_continuous(_continuous("array:jackal:front_left", source_id="array_mic"))
+    node._cb_continuous(_continuous("robot:other", source_id="unknown_robot"))
     assert node._pending == []
     _settle(rclpy, [node, consumer])
     assert heard == []

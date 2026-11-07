@@ -55,7 +55,7 @@ the env (`/arena/env_0/arena_env_node/<node>` for env 0):
 | `robot_emitter` | `robot_emitter` | Publishes the continuous noise sources of every robot, the motor driven by its odometry. |
 | `array_renderer` | `renderer` (`render.role: array`) | Renders the microphone array (`array.spec`) of every fleet robot to PCM, the stems, the monitor and the diagnostics. Plays one robot's monitor on the workstation while `output.enabled`. Runs with `OMP_NUM_THREADS=1`. |
 | `listener_renderer` | `renderer` (`render.role: listener`) | Renders the single microphone `listener.id` to the workstation. Not launched with `auditory.output.device:=none`. |
-| `robot_hearing_node` | `robot_hearing_node` | The simulator bus: republishes what each robot's `robot:<r>` listener hears as `<r>/heard_sound`, `arena_robots_msgs/SoundDetection` on `<r>/hearing/bus/detections` and a text marker. |
+| `robot_hearing_node` | `robot_hearing_node` | The simulator bus: republishes what each robot's `robot:<r>` listener hears (`HeardSoundEvent` and `ContinuousHeardSoundState`) as `<r>/heard_sound`, `arena_robots_msgs/SoundDetection` on `<r>/hearing/bus/detections` and a text marker. |
 | `sound_propagation_visualizer` | `sound_propagation_visualizer` | Propagation paths, rooms, portals and environment sources in RViz. Launched with `auditory.viz.enabled:=true`. |
 
 The robot hearing nodes come from `arena_hearing`, see [Robot hearing](#robot-hearing).
@@ -561,11 +561,15 @@ Frame` makes it follow a frame. Runtime microphones are
 
 Robot hearing is the package `arena_hearing`, selected per env with
 `robot.hearing:=bus|srp|seld`. This package keeps the `bus` front end:
-`robot_hearing_node` publishes the propagated `robot:<r>` receptions as
-`arena_robots_msgs/SoundDetection` on `<r>/hearing/bus/detections` with
-map-frame bearings, the input of the `arena_hearing` belief node under
-`robot.hearing:=bus`. `srp` and `seld` read `<r>/audio/raw_array` and default
-`auditory.array.spec` to `four_mic`.
+`robot_hearing_node` publishes the propagated `robot:<r>` receptions of events
+and continuous sources as `arena_robots_msgs/SoundDetection` on
+`<r>/hearing/bus/detections` with map-frame bearings, the input of the
+`arena_hearing` belief node under `robot.hearing:=bus`. A continuous source
+gives one detection each time it becomes audible to a robot: while its
+`robot:<r>` receptions stay audible and above `bus.min_snr_db` it gives
+no more, and it counts as silent again after a non-audible state or
+`bus.continuous.gap_s` (0.5 s) without a reception. `srp` and `seld` read
+`<r>/audio/raw_array` and default `auditory.array.spec` to `four_mic`.
 
 ```bash
 export ARENA_WORLD_PATH=$ARENA_DATA_DIR/assets/public/benchmarks/suites/acoustics/worlds

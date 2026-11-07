@@ -227,6 +227,7 @@ class BusGroup(ParamGroup):
     IGNORE_SELF_ENABLED = Param[bool]("bus.ignore_self.enabled", True)
     MIN_SNR_DB = Param[float]("bus.min_snr_db", -5.0, parse=finite)
     DELAY_ENABLED = Param[bool]("bus.delay.enabled", True)
+    CONTINUOUS_GAP_S = Param[float]("bus.continuous.gap_s", 0.5, parse=positive, description="A continuous source silent this long ends its audible run, so its next reception is a new detection.")
     MARKERS_LIFETIME_S = Param[float]("bus.markers.lifetime_s", 1.5, parse=positive)
     MARKERS_Z_M = Param[float]("bus.markers.z_m", 1.2, parse=finite)
     MARKERS_TEXT_HEIGHT_M = Param[float]("bus.markers.text_height_m", 0.35, parse=positive)

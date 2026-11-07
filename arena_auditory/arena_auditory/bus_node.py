@@ -6,7 +6,7 @@ import math
 from concurrent.futures import ThreadPoolExecutor
 
 import attrs
-from arena_auditory_msgs.msg import HeardSoundEvent
+from arena_auditory_msgs.msg import ContinuousHeardSoundState, HeardSoundEvent
 from arena_rclpy_mixins import ArenaMixinNode, qos
 from arena_rclpy_mixins.lazy import LazyPublisher
 from arena_robots.fleet import robot_bindings
@@ -19,7 +19,7 @@ from rclpy.time import Time
 from std_msgs.msg import ColorRGBA, Header
 from visualization_msgs.msg import Marker
 
-from arena_auditory.constants import BUS_FRONTEND, HEARD_SOUND_EVENTS, STATE_ROBOTS, detections, heard_sound, heard_sound_marker
+from arena_auditory.constants import BUS_FRONTEND, CONTINUOUS_HEARD_SOUNDS, HEARD_SOUND_EVENTS, STATE_ROBOTS, detections, heard_sound, heard_sound_marker
 from arena_auditory.params import Configuration
 from arena_auditory.shared import ListenerId, ListenerKind
 from arena_auditory.world_tracker import follow_world_sounds
@@ -52,8 +52,10 @@ class BusNode(ArenaMixinNode):
         follow_world_sounds(self, self._library, self._loader)
         self._robots: dict[str, _RobotOutputs] = {}
         self._pending: list[_Pending] = []
+        self._last_audible: dict[tuple[str, str], Time] = {}
         self.create_subscription(RobotFleet, STATE_ROBOTS, self._cb_fleet, qos.latched())
         self.create_subscription(HeardSoundEvent, HEARD_SOUND_EVENTS, self._cb_heard, qos.reliable(50))
+        self.create_subscription(ContinuousHeardSoundState, CONTINUOUS_HEARD_SOUNDS, self._cb_continuous, qos.best_effort(64))
         self.create_timer(RELEASE_PERIOD_S, self._release)
         self.get_logger().info(f"robot hearing node listening on {self.resolve_topic_name(HEARD_SOUND_EVENTS)!r}, waiting for the robot fleet")
 
@@ -65,6 +67,7 @@ class BusNode(ArenaMixinNode):
         for binding in robot_bindings(msg):
             if binding.name in self._robots:
                 continue
+            self._last_audible.clear()
             if binding.error:
                 self.get_logger().warning(f"{binding.error}, markers use {binding.base_frame!r}")
             self._robots[binding.name] = _RobotOutputs(
@@ -76,24 +79,46 @@ class BusNode(ArenaMixinNode):
             self.get_logger().info(f"registered robot hearing outputs for {binding.name!r} in frame {binding.base_frame!r}")
 
     def _cb_heard(self, msg: HeardSoundEvent) -> None:
+        robot = self._hearing_robot(msg)
+        if robot is not None:
+            self._enqueue(robot, msg)
+
+    def _cb_continuous(self, msg: ContinuousHeardSoundState) -> None:
+        event = HeardSoundEvent(header=msg.header, source=msg.source, reception=msg.reception)
+        key = (msg.reception.listener_id, msg.source.id)
+        robot = self._hearing_robot(event)
+        if robot is None:
+            self._last_audible.pop(key, None)
+            return
+        now = self.get_clock().now()
+        previous = self._last_audible.get(key)
+        self._last_audible[key] = now
+        if previous is not None and now - previous <= Duration(seconds=self._bus.CONTINUOUS_GAP_S.value):
+            return
+        self._enqueue(robot, event)
+
+    def _hearing_robot(self, msg: HeardSoundEvent) -> str | None:
         try:
             listener = ListenerId.parse(msg.reception.listener_id)
         except ValueError:
-            return
+            return None
         if listener.kind is not ListenerKind.ROBOT or listener.owner not in self._robots:
-            return
+            return None
         bus = self._bus
         if bus.IGNORE_SELF_ENABLED.value and msg.source.agent_kind == AgentKind.ROBOT and msg.source.agent_name == listener.owner:
-            return
+            return None
         if not msg.reception.audible:
-            return
+            return None
         if float(msg.reception.received_level_db - msg.reception.threshold_db) < bus.MIN_SNR_DB.value:
-            return
-        if bus.DELAY_ENABLED.value:
+            return None
+        return listener.owner
+
+    def _enqueue(self, robot: str, msg: HeardSoundEvent) -> None:
+        if self._bus.DELAY_ENABLED.value:
             release = Time.from_msg(msg.header.stamp) + Duration(seconds=float(msg.reception.direct_delay_s))
         else:
             release = self.get_clock().now()
-        self._pending.append(_Pending(release=release, robot=listener.owner, msg=msg))
+        self._pending.append(_Pending(release=release, robot=robot, msg=msg))
 
     def _release(self) -> None:
         if not self._pending:
