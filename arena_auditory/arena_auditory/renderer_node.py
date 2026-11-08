@@ -27,7 +27,7 @@ from arena_auditory_msgs.msg import (
 )
 from arena_rclpy_mixins import ArenaMixinNode
 from arena_rclpy_mixins.lazy import LazyPublisher
-from arena_rclpy_mixins.param_groups import Param, ParamGroup
+from arena_rclpy_mixins.params import Param, ParamGroup
 from arena_rclpy_mixins.qos import best_effort, latched, reliable
 from arena_rclpy_mixins.Time import Time
 from arena_robots.audio import SPEED_OF_SOUND_MPS, ArrayStream, array_stream, dbfs_from_rms, gcc_phat, load_array_spec, rms
@@ -176,7 +176,7 @@ class RendererNode(ArenaMixinNode):
         self._output_conf = conf.Output
         self._motor_conf = conf.Motor
         self._diagnostics_conf = conf.Diagnostics
-        self._role = self._render_conf.ROLE.value
+        self._role = conf.Role.ROLE.value
         if self._role is RenderRole.ARRAY:
             self._array_conf = conf.Array
             self._tdoa_conf = conf.Tdoa

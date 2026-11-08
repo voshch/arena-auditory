@@ -2,12 +2,13 @@
 
 import launch
 import launch.actions
-from arena_rclpy_mixins.param_groups import declare_launch_arguments
+from arena_rclpy_mixins.params import declare_launch_arguments
 from launch_ros.actions import Node
 
-from arena_auditory.params import MotorGroup, MotorModel, RenderRole, all_params
+from arena_auditory.params import EnvGroup, RenderRole, RoleGroup, all_params
 
 _RESERVED = ("namespace", "hearing", "use_sim_time", "ros_remaps")
+_PLUMBING = (EnvGroup.NS.name, RoleGroup.ROLE.name)
 _HEARING_ARRAY_SPEC = {"bus": "", "srp": "four_mic", "seld": "four_mic"}
 
 
@@ -55,8 +56,7 @@ def generate_launch_description() -> launch.LaunchDescription:
             launch.actions.DeclareLaunchArgument("namespace", default_value="", description="Task generator node namespace, the stack nodes live below it."),
             launch.actions.DeclareLaunchArgument("env.ns", default_value="", description="Env namespace of the pedestrian topics."),
             launch.actions.DeclareLaunchArgument("hearing", default_value="none", choices=["none", *_HEARING_ARRAY_SPEC], description="Robot hearing frontend, srp and seld default array.spec to four_mic."),
-            *declare_launch_arguments(all_params(), reserved=(MotorGroup.MODEL.name,)),
-            launch.actions.DeclareLaunchArgument(MotorGroup.MODEL.name, default_value="", choices=["", *(model.value for model in MotorModel)], description=f"{MotorGroup.MODEL.description} Empty = node default."),
+            *declare_launch_arguments(all_params(), reserved=_PLUMBING),
             launch.actions.OpaqueFunction(function=_stack),
         ]
     )

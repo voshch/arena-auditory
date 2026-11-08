@@ -4,7 +4,7 @@ from pathlib import Path
 
 import attrs
 import yaml
-from arena_rclpy_mixins.param_groups import configure
+from arena_rclpy_mixins.params import configure
 from arena_simulation_setup.kg import Scene
 from arena_simulation_setup.tree.World import Level, World, WorldIdentifier, WorldView
 from shapely.geometry import Polygon

@@ -118,7 +118,7 @@ def test_pedestrian_state_takes_yaw_from_orientation_and_speed_from_twist() -> N
 
 def test_footstep_on_a_ceramic_tile_zone_is_tagged_ceramic_tile(human_emitter) -> None:
     import rclpy
-    from arena_rclpy_mixins.param_groups import configure
+    from arena_rclpy_mixins.params import configure
     from arena_rclpy_mixins.qos import latched
     from arena_simulation_setup.tree.assets.sound_catalog import SoundLibrary
     from nav_msgs.msg import OccupancyGrid

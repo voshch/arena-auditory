@@ -7,7 +7,7 @@ import typing
 from collections.abc import Callable, Hashable
 from concurrent.futures import Executor, Future, ThreadPoolExecutor
 
-from arena_rclpy_mixins.param_groups import configure
+from arena_rclpy_mixins.params import configure
 from arena_rclpy_mixins.qos import latched
 from arena_runtime_msgs.msg import EpisodeRecord
 from arena_simulation_setup.tree.assets.sound_catalog import SoundLibrary

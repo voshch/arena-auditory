@@ -4,7 +4,7 @@ import math
 from pathlib import Path
 
 import pytest
-from arena_rclpy_mixins.param_groups import configure
+from arena_rclpy_mixins.params import configure
 from shapely.geometry import Polygon
 
 from arena_auditory.materials import AcousticMaterialCatalog
