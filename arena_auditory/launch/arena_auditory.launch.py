@@ -2,7 +2,7 @@
 
 import launch
 import launch.actions
-from arena_rclpy_mixins.params import declare_launch_arguments
+from arena_rclpy_mixins.launch_argument import LaunchArgument
 from launch_ros.actions import Node
 
 from arena_auditory.params import EnvGroup, RenderRole, RoleGroup, all_params
@@ -53,10 +53,10 @@ def _stack(context: launch.LaunchContext) -> list[launch.LaunchDescriptionEntity
 def generate_launch_description() -> launch.LaunchDescription:
     return launch.LaunchDescription(
         [
-            launch.actions.DeclareLaunchArgument("namespace", default_value="", description="Task generator node namespace, the stack nodes live below it."),
-            launch.actions.DeclareLaunchArgument("env.ns", default_value="", description="Env namespace of the pedestrian topics."),
-            launch.actions.DeclareLaunchArgument("hearing", default_value="none", choices=["none", *_HEARING_ARRAY_SPEC], description="Robot hearing frontend, srp, seld and call default array.spec to four_mic."),
-            *declare_launch_arguments(all_params(), reserved=_PLUMBING),
+            LaunchArgument("namespace", default_value="", description="Task generator node namespace."),
+            LaunchArgument("env.ns", default_value="", description="Env namespace."),
+            LaunchArgument("hearing", default_value="none", choices=["none", *_HEARING_ARRAY_SPEC], description="Robot hearing frontend."),
+            *(LaunchArgument.from_param(param) for name, param in all_params().items() if name not in _PLUMBING),
             launch.actions.OpaqueFunction(function=_stack),
         ]
     )
