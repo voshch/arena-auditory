@@ -71,7 +71,7 @@ class WorldGroup(ParamGroup):
     COVERAGE_ENABLED = Param[bool]("world.coverage.enabled", True, "Audit the acoustic zone coverage of the world map at startup.")
     COVERAGE_STRIDE_CELLS = Param[int]("world.coverage.stride_cells", 10, "Coverage audit samples every this many free map cells.", constraint=Range(lo=0))
     COVERAGE_TOLERANCE_M = Param[float]("world.coverage.tolerance_m", 0.35, "Distance in m a sampled free cell may be from every zone before it counts as uncovered.", constraint=Range(lo=0.0))
-    MAP_SOURCE = Param[MapSource]("debug.map_source", MapSource.COMPUTE, "Occupancy map the acoustic world is built from, computed in process or read from the level preview map on disk.")
+    MAP_SOURCE = Param[MapSource]("debug.map_source", MapSource.COMPUTE, "Source of the occupancy map the acoustic world is built from.")
 
 
 class MapGroup(ParamGroup):
@@ -111,8 +111,8 @@ class Level3Group(ParamGroup):
 
 
 class PropagationGroup(ParamGroup):
-    ENABLED = Param[bool]("propagation.enabled", True, "Run sound propagation, off silences every reception.")
-    BACKEND = Param[BackendName]("propagation.backend", BackendName.PYROOMACOUSTICS, "Propagation backend, pyroomacoustics, level3 or legacy.")
+    ENABLED = Param[bool]("propagation.enabled", True, "Run sound propagation.")
+    BACKEND = Param[BackendName]("propagation.backend", BackendName.PYROOMACOUSTICS, "Propagation backend.")
     THRESHOLD_DB = Param[float]("propagation.threshold_db", 20.0, "Level in dB a reception must reach to count as audible.")
     MIN_DISTANCE_M = Param[float]("propagation.min_distance_m", 1.0, "Distance in m below which the spreading loss stops growing.", constraint=Range(lo=0.0, lo_open=True))
     OCCLUSION_DB = Param[float]("propagation.occlusion_db", 20.0, "Attenuation in dB of a source with no line of sight to the listener, legacy backend.")
@@ -122,7 +122,7 @@ class PropagationGroup(ParamGroup):
     BUFFER_SIZE = Param[int]("propagation.buffer.size", 128, "Most emissions the buffer holds (0 = none).", constraint=Range(lo=0))
     BUFFER_MAX_AGE_S = Param[float]("propagation.buffer.max_age_s", 1.0, "Age in s after which a buffered emission is dropped.", constraint=Range(lo=0.0, lo_open=True))
     PEDESTRIAN_LISTENERS_ENABLED = Param[bool]("pedestrian_listeners.enabled", False, "Pedestrians are propagation listeners and receive sound stimuli through the human simulator.")
-    PEDESTRIAN_LISTENERS_DISCRETE_ENABLED = Param[bool]("pedestrian_listeners.discrete.enabled", False, "Publish discrete pedestrian sound stimuli, defaults to the value of viz.enabled in the launch file.")
+    PEDESTRIAN_LISTENERS_DISCRETE_ENABLED = Param[bool]("pedestrian_listeners.discrete.enabled", False, "Publish discrete pedestrian sound stimuli.")
     PEDESTRIAN_EAR_HEIGHT_M = Param[float]("pedestrian_listeners.ear_height_m", 1.6, "Ear height in m of pedestrian listeners.", constraint=Range(lo=0.0))
     MICROPHONES = Param[str]("microphones", "[]", "YAML list of robot microphone mappings (owner, robot, placement, frame, index).")
     VIEWPORT_HEIGHT_M = Param[float]("viewport.height_m", 1.6, "Listening height of the viewport camera's down-projection microphone.", constraint=Range(lo=0.0))
@@ -150,45 +150,45 @@ class OutputGroup(ParamGroup):
     BLOCK_SIZE = Param[int]("output.block_size", 512, "Workstation audio callback block size.", constraint=Range(lo=0))
     BUFFER_S = Param[float]("output.buffer_s", 0.04, "Workstation jitter buffer target in seconds, raise it on repeated underflows.", constraint=Range(lo=0.0, lo_open=True))
     RETRY_PERIOD_S = Param[float]("output.retry_period_s", 2.0, "Seconds between attempts to open the output device after a failure.", constraint=Range(lo=0.0, lo_open=True))
-    ENABLED = Param[bool]("output.enabled", True, "Play audio on the workstation, off starts no listener renderer output.")
+    ENABLED = Param[bool]("output.enabled", True, "Play audio on the workstation.")
     MOTOR_ENABLED = Param[bool]("output.motor.enabled", True, "Play robot motor audio on the workstation.")
     AMBIENT_ENABLED = Param[bool]("output.ambient.enabled", True, "Play environment audio on the workstation. Emission and robot hearing continue when false.")
 
 
 class MonitorGroup(ParamGroup):
     ENABLED = Param[bool]("monitor.enabled", True, "Mix the array microphones down to the monitor stereo stream.")
-    MASTER_GAIN_DB = Param[float]("monitor.master_gain_db", PerRole(array=20.0 * math.log10(0.8), listener=0.0), "Master gain in dB on the monitor mix, defaults per render role.")
+    MASTER_GAIN_DB = Param[float]("monitor.master_gain_db", PerRole(array=20.0 * math.log10(0.8), listener=0.0), "Master gain in dB on the monitor mix.")
     GAIN_DB = Param[float]("monitor.gain_db", 36.0, "Gain in dB on the monitor mix before limiting.", constraint=Range(lo=0.0, hi=60.0))
     LIMIT = Param[float]("monitor.limit", 0.98, "Peak limit of the monitor mix as a fraction of full scale.", constraint=Range(lo=0.0, hi=1.0, lo_open=True))
     FRONT_GAIN = Param[float]("monitor.front_gain", 1.0, "Linear gain of the front microphones in the stereo monitor mix.", constraint=Range(lo=0.0, hi=4.0))
-    REAR_GAIN = Param[float]("monitor.rear_gain", PerRole(array=0.75, listener=1.0), "Linear gain of the rear microphones in the stereo monitor mix, defaults per render role.", constraint=Range(lo=0.0, hi=4.0))
+    REAR_GAIN = Param[float]("monitor.rear_gain", PerRole(array=0.75, listener=1.0), "Linear gain of the rear microphones in the stereo monitor mix.", constraint=Range(lo=0.0, hi=4.0))
     SOLO = Param[str]("monitor.solo", "", "Microphone label routed alone to the monitor (empty = all).")
-    MODE = Param[MonitorMode]("monitor.mode", MonitorMode.STEREO, "Monitor mix, stereo downmix of the array or the hearing mix.")
+    MODE = Param[MonitorMode]("monitor.mode", MonitorMode.STEREO, "Monitor mix.")
 
 
 class RoleGroup(ParamGroup):
-    ROLE = Param[RenderRole]("render.role", RenderRole.ARRAY, "Renderer role, array renders robot microphones and listener renders the workstation playback.")
+    ROLE = Param[RenderRole]("render.role", RenderRole.ARRAY, "Renderer role.")
 
 
 class RenderGroup(ParamGroup):
     MAX_CATCHUP_BLOCKS = Param[int]("render.max_catchup_blocks", 40, "Most audio blocks the renderer produces at once to catch up after a stall.", constraint=Range(lo=0))
-    RIR_ENABLED = Param[bool]("render.rir.enabled", PerRole(array=False, listener=True), "Convolve sources with their room impulse response, defaults per render role.")
+    RIR_ENABLED = Param[bool]("render.rir.enabled", PerRole(array=False, listener=True), "Convolve sources with their room impulse response.")
     RIR_CROSSFADE_S = Param[float]("render.rir.crossfade_s", 0.1, "Crossfade in s between two room impulse responses of one source.", constraint=Range(lo=0.0))
     RIR_DRY_FALLBACK_ENABLED = Param[bool]("render.rir.dry_fallback.enabled", True, "Play the dry source while its room impulse response is not ready.")
-    INAUDIBLE_ENABLED = Param[bool]("render.inaudible.enabled", PerRole(array=False, listener=True), "Render receptions flagged inaudible, defaults per render role.")
-    MIN_LEVEL_DB = Param[float]("render.min_level_db", PerRole(array=-120.0, listener=-20.0), "Level in dB below which the renderer skips a reception, defaults per render role.")
-    LOCKSTEP_ENABLED = Param[bool]("render.lockstep.enabled", PerRole(array=True, listener=False), "Render in lockstep with the simulator clock, defaults per render role.")
+    INAUDIBLE_ENABLED = Param[bool]("render.inaudible.enabled", PerRole(array=False, listener=True), "Render receptions flagged inaudible.")
+    MIN_LEVEL_DB = Param[float]("render.min_level_db", PerRole(array=-120.0, listener=-20.0), "Level in dB below which the renderer skips a reception.")
+    LOCKSTEP_ENABLED = Param[bool]("render.lockstep.enabled", PerRole(array=True, listener=False), "Render in lockstep with the simulator clock.")
     CONTINUOUS_MAX_AGE_S = Param[float]("render.continuous.max_age_s", 2.0, "Age in s after which a continuous source without new receptions is dropped.", constraint=Range(lo=0.0, lo_open=True))
     BED_ENABLED = Param[bool]("render.bed.enabled", False, "Add a diffuse ambient bed to every robot array: seamless pink noise from 20 Hz, independent per microphone, in stem_ambient.")
     BED_LEVEL_DBA = Param[float]("render.bed.level_dba", 40.0, "A-weighted level of the ambient bed at each array microphone, dB SPL through the array sensitivity.")
 
 
 class ArrayGroup(ParamGroup):
-    SPEC = Param[str]("array.spec", "stereo", "Robot microphone array, stereo, four_mic, mono or a yaml path. Empty is four_mic when robot.hearing is srp or seld.")
+    SPEC = Param[str]("array.spec", "stereo", "Robot microphone array, a named array or a yaml path.")
     MOUNT_FRAME = Param[str]("array.mount_frame", "", "TF frame the robot microphone array is mounted on, {prefix} and {base_frame} expand, a bare leaf joins the robot prefix. Empty uses the robot base frame.", parse=_frame_template)
     ROBOT = Param[str]("array.robot", "", "Robot the array belongs to (empty = all robots).")
     ENABLED = Param[bool]("array.enabled", True, "Render the robot microphone array.")
-    MUTED = Param[bool]("array.muted", False, "Mute the array monitor output, the receptions still feed hearing.")
+    MUTED = Param[bool]("array.muted", False, "Mute the array monitor output.")
 
 
 class TdoaGroup(ParamGroup):
@@ -240,7 +240,7 @@ class VizGroup(ParamGroup):
     LIFETIME_S = Param[float]("viz.lifetime_s", 5.0, "Lifetime in s of a propagation marker.", constraint=Range(lo=0.0, lo_open=True))
     CONTINUOUS_LIFETIME_S = Param[float]("viz.continuous_lifetime_s", 0.5, "Lifetime in s of a continuous source marker.", constraint=Range(lo=0.0, lo_open=True))
     LISTENER_ID = Param[str]("viz.listener_id", "", "Listener whose receptions the markers show (empty = all).")
-    PLOT_MODE = Param[PlotMode]("viz.plot.mode", PlotMode.OFF, "Live acoustic plot dashboard, off or live.")
+    PLOT_MODE = Param[PlotMode]("viz.plot.mode", PlotMode.OFF, "Live acoustic plot dashboard.")
     PLOT_LISTENER_ID = Param[str]("viz.plot.listener_id", "", "Listener the plot shows (empty = viz.listener_id).")
     PLOT_RATE_HZ = Param[float]("viz.plot.rate_hz", 2.0, "Plot refresh rate in Hz.", constraint=Range(lo=0.0, lo_open=True))
     PLOT_QUANTIZATION_M = Param[float]("viz.plot.quantization_m", 0.10, "Grid in m that positions snap to for the plot RIR cache key.", constraint=Range(lo=0.0, lo_open=True))
