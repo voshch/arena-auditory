@@ -179,6 +179,8 @@ class RenderGroup(ParamGroup):
     MIN_LEVEL_DB = Param[float]("render.min_level_db", PerRole(array=-120.0, listener=-20.0), "Level in dB below which the renderer skips a reception, defaults per render role.")
     LOCKSTEP_ENABLED = Param[bool]("render.lockstep.enabled", PerRole(array=True, listener=False), "Render in lockstep with the simulator clock, defaults per render role.")
     CONTINUOUS_MAX_AGE_S = Param[float]("render.continuous.max_age_s", 2.0, "Age in s after which a continuous source without new receptions is dropped.", constraint=Range(lo=0.0, lo_open=True))
+    BED_ENABLED = Param[bool]("render.bed.enabled", False, "Add a diffuse ambient bed to every robot array: seamless pink noise from 20 Hz, independent per microphone, in stem_ambient.")
+    BED_LEVEL_DBA = Param[float]("render.bed.level_dba", 40.0, "A-weighted level of the ambient bed at each array microphone, dB SPL through the array sensitivity.")
 
 
 class ArrayGroup(ParamGroup):

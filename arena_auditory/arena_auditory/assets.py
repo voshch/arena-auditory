@@ -13,6 +13,8 @@ from arena_simulation_setup.tree.assets.sound_catalog import SoundLibrary, sampl
 from scipy.io import wavfile
 from scipy.signal import resample_poly
 
+from arena_auditory.synthetic import a_weighted_rms, parse_bed_key, pink_bed
+
 _durations: dict[Path, float] = {}
 _durations_lock = threading.Lock()
 
@@ -92,6 +94,7 @@ class SampleDecoder:
         self._library = library
         self._sample_rate_hz = int(sample_rate_hz)
         self._cache: dict[tuple[Path, float], DecodedSample] = {}
+        self._synthesized: dict[str, DecodedSample] = {}
         self._lock = threading.Lock()
 
     @property
@@ -113,5 +116,15 @@ class SampleDecoder:
             return cached
 
     def by_key(self, key: str) -> DecodedSample:
-        """Decode by sample key. Raises KeyError for a key without an asset id."""
-        return self.load(*split_sample_key(key))
+        """Decode by sample key, a bed key synthesized. Raises KeyError for a key without an asset id."""
+        bed = parse_bed_key(key)
+        if bed is None:
+            return self.load(*split_sample_key(key))
+        with self._lock:
+            cached = self._synthesized.get(key)
+        if cached is not None:
+            return cached
+        samples = pink_bed(self._sample_rate_hz, *bed)
+        built = DecodedSample(key=key, samples=samples, sample_rate_hz=self._sample_rate_hz, duration_s=samples.size / self._sample_rate_hz, active_rms=a_weighted_rms(samples, self._sample_rate_hz))
+        with self._lock:
+            return self._synthesized.setdefault(key, built)

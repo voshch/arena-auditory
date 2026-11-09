@@ -71,6 +71,7 @@ from arena_auditory.render.monitor import MonitorConfig, apply_controls, monitor
 from arena_auditory.render.output import DISABLED_DEVICES, AudioOutput
 from arena_auditory.shared import ListenerId, SourceSpec
 from arena_auditory.sources import SOURCE_MODELS, BufferProgram, ProgramContext, StreamModel, StreamProgram, stream_model, stream_models, streamed, tuning_of
+from arena_auditory.synthetic import bed_key, bed_seed
 from arena_auditory.world_tracker import follow_world_sounds
 
 EVENT_QOS = reliable(50)
@@ -88,6 +89,7 @@ STEREO_NAMES = ("left", "right")
 LEVEL_LABEL_PERIOD_S = 0.25
 CONTINUOUS_STALE_S = 0.5
 IMPULSE_WAIT_BLOCKS = 1
+BED_SOURCE_ID = "ambient_bed"
 
 LOAD_ERRORS = (OSError, LookupError, ValueError, TypeError, yaml.YAMLError)
 
@@ -346,7 +348,27 @@ class RendererNode(ArenaMixinNode):
         target.publishers[ArrayStream.ACTIVITY] = self.create_publisher(RenderedSoundActivity, array_stream(robot, ArrayStream.ACTIVITY), EVENT_QOS)
         target.publishers[ArrayStream.LEVELS] = self.create_publisher(MarkerArray, array_stream(robot, ArrayStream.LEVELS), reliable(1))
         target.lazy = {stream: LazyPublisher(target.publishers[stream]) for stream in LAZY_STREAMS}
+        self._add_bed(target)
         return target
+
+    def _add_bed(self, target: RenderTarget) -> None:
+        """The robot's ambient bed as one looped voice per microphone, independent noise each, from the target's cursor on."""
+        if self._role is not RenderRole.ARRAY or not self._render_conf.BED_ENABLED.value:
+            return
+        seed = bed_seed(target.robot)
+        for channel in range(self.spec.channels):
+            sample = self._decoder.by_key(bed_key(seed, channel))
+            self._samples[sample.key] = sample
+            target.continuous[(BED_SOURCE_ID, channel)] = ContinuousInput(
+                source_id=BED_SOURCE_ID,
+                channel=channel,
+                asset_key=sample.key,
+                gain=self._spl_gain(self._render_conf.BED_LEVEL_DBA.value, sample),
+                delay_target=0.0,
+                loop=True,
+                program_start=target.state.cursor,
+                stem="ambient",
+            )
 
     def _stop_array(self, target: RenderTarget) -> None:
         self._reset_target(target)
@@ -420,6 +442,7 @@ class RendererNode(ArenaMixinNode):
         target.reported_activity.clear()
         target.state = new_state(self.spec.channels)
         target.state.cursor = self._sample_index
+        self._add_bed(target)
 
     def _idle(self) -> bool:
         return self._role is RenderRole.LISTENER and not self._listener_id
@@ -598,7 +621,7 @@ class RendererNode(ArenaMixinNode):
 
     def _program(self, source: SourceSpec) -> BufferProgram | StreamProgram:
         asset, variant = self._variant(source)
-        return SOURCE_MODELS.get(variant.model).program(source, asset, variant, self._program_context)
+        return SOURCE_MODELS.get(source.model).program(source, asset, variant, self._program_context)
 
     def _stream_params(self, source: SourceSpec, model: type[StreamModel]) -> dict[str, object] | None:
         """The params of the source's variant with its model prewarmed for them, None when they do not resolve."""

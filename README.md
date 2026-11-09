@@ -30,6 +30,7 @@ arena_auditory/                 this repository
 |   |   |-- world.py rooms.py materials.py   acoustic world, rooms, materials
 |   |   |-- world_tracker.py    world and map subscriptions, realizes the world in the map frame
 |   |   |-- assets.py           sample decoding of sound assets
+|   |   |-- synthetic.py        the ambient bed, rebuilt from its sample keys
 |   |   |-- propagation/        backends, portal routing, RIR cache, impulses
 |   |   |-- sources/            source models (wav, wav_loop, drivetrain), pedestrian events
 |   |   |-- render/             block renderer, DSP, monitor, workstation output
@@ -138,6 +139,8 @@ and `auditory.static_sounds`. The arguments are:
 | `auditory.viewport.height_m` | `1.6` | Height of the viewport down-projection microphone |
 | `auditory.array.spec` | `stereo` | `mono`, `stereo`, `four_mic` or a yaml path. `four_mic` when `robot.hearing` is `srp` or `seld` |
 | `auditory.array.mount_frame` | empty | TF frame of the array, `{prefix}` and `{base_frame}` expand, a bare leaf joins the robot prefix, empty uses the base frame |
+| `auditory.render.bed.enabled` | `false` | Add the ambient bed to every robot array, see [Ambient bed](#ambient-bed) |
+| `auditory.render.bed.level_dba` | `40.0` | A-weighted level of the ambient bed at each array microphone |
 | `auditory.microphones` | `[]` | Extra robot-mounted microphones |
 | `auditory.static_sounds` | `[]` | Launch-defined sound entities |
 
@@ -327,7 +330,7 @@ the `stem` of each source's sound kind (`SoundSource.kind`), whoever emits it:
 | Stem | Kinds |
 |---|---|
 | `stem_pedestrian` | `footstep`, `speech`, also when a robot speaks |
-| `stem_ambient` | `music`, `alarm` |
+| `stem_ambient` | `music`, `alarm`, the ambient bed |
 | `stem_motor` | `motor`, the ego-noise |
 
 All four share channel order, stamp and sample clock, so an episode can be
@@ -339,11 +342,22 @@ clipped samples, which tells whether `raw_array` itself was clamped.
 complete input state of the block (version 2: channels, stems, RIR keys and
 streamed sources with their model, params, state, tuning, paths per channel
 and own-robot flag). Clips and continuous sources name their sample by its
-key `<asset id>#<variant id>`.
+key `<asset id>#<variant id>` and the ambient bed by
+`bed@pink=<seed>,<channel>`, which the offline replay rebuilds.
 `auditory_offline_render` reproduces the recorded audio from that trace alone,
 bit for bit. Traces recorded before keys carried the asset id hold the bare
 variant id, which the offline replay alone resolves by searching the local
 sound assets for the one asset with that variant.
+
+### Ambient bed
+
+With `render.bed.enabled` the array renderer adds a building ambient bed to
+every robot array: a 60 s seamless loop of pink noise from 20 Hz, one
+independent loop per microphone (seeded by the robot name and the channel),
+so the bed is diffuse and incoherent across the array. Each loop is scaled to
+`render.bed.level_dba` A-weighted (IEC 61672) at the microphone through the
+array spec's sensitivity, and lands in `stem_ambient`. It restarts with the
+render state at every episode reset.
 
 ### Monitor and output
 
