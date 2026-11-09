@@ -5,7 +5,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from arena_rclpy_mixins.param_groups import configure
+from arena_rclpy_mixins.params import configure
 from arena_robots.audio import SPEED_OF_SOUND_MPS
 from arena_simulation_setup.tree.assets.sound_catalog import AgentKind
 

@@ -19,7 +19,7 @@ from arena_auditory.sources.drivetrain.voice import DrivetrainVoice, RenderOptio
 from arena_auditory.sources.drivetrain.voice import prewarm as prewarm_field
 
 if typing.TYPE_CHECKING:
-    from arena_rclpy_mixins.param_groups import ParamGroup
+    from arena_rclpy_mixins.params import ParamGroup
     from arena_simulation_setup.tree.assets.sound_catalog import SoundAsset, Variant
 
     from arena_auditory.sources import ProgramContext

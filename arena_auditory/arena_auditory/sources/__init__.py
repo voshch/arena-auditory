@@ -15,7 +15,7 @@ from arena_auditory.shared import SourceSpec
 from arena_auditory.sources.events import PedestrianEventDetector, PedestrianState
 
 if typing.TYPE_CHECKING:
-    from arena_rclpy_mixins.param_groups import ParamGroup
+    from arena_rclpy_mixins.params import ParamGroup
 
 
 @attrs.frozen

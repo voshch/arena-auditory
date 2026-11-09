@@ -20,7 +20,6 @@ from pathlib import Path
 import numpy as np
 import numpy.typing as npt
 import yaml
-from arena_rclpy_mixins.param_groups import PerRole
 from arena_robots.audio import ArrayStream
 from arena_simulation_setup.tree.assets.sound_catalog import SoundLibrary, split_sample_key
 from mcap.exceptions import McapError
@@ -419,8 +418,7 @@ def _output_name(job: EpisodeJob) -> str:
 
 
 def _parse_args() -> argparse.Namespace:
-    rir_crossfade_s = RenderGroup.RIR_CROSSFADE_S.default
-    assert not isinstance(rir_crossfade_s, PerRole)
+    rir_crossfade_s = RenderGroup.RIR_CROSSFADE_S.parsed_default()
     parser = argparse.ArgumentParser(
         prog="auditory_offline_render",
         description="Replay recorded episodes through the live array renderer.",
@@ -437,7 +435,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--world", type=Path, default=None, help="world directory whose world-local sounds the recording used (default: shared and bucket sounds only)")
     parser.add_argument("--sample-rate", type=int, default=0, metavar="HZ", help="override the sample rate read from the recorded audio")
     parser.add_argument("--block-size", type=int, default=0, metavar="FRAMES", help="override the block size read from the recorded audio")
-    parser.add_argument("--rir-crossfade-s", type=float, default=float(rir_crossfade_s), metavar="S", help="render.rir.crossfade_s of the recording, used when room impulses change key (default: the renderer default)")
+    parser.add_argument("--rir-crossfade-s", type=float, default=rir_crossfade_s, metavar="S", help="render.rir.crossfade_s of the recording, used when room impulses change key (default: the renderer default)")
     parser.add_argument("--jobs", type=int, default=0, metavar="N", help="worker processes (default: one per CPU, capped at the number of recordings)")
     return parser.parse_args()
 

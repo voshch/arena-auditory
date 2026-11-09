@@ -5,7 +5,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from arena_rclpy_mixins.param_groups import configure
+from arena_rclpy_mixins.params import configure
 
 from arena_auditory.materials import AcousticMaterialCatalog
 from arena_auditory.params import RirGroup

@@ -114,8 +114,9 @@ ros2 param set /arena/env_0/arena_env_node/sound_propagation_node propagation.en
 every stack node as ROS parameter `<param>`, coerced to the type of its default
 in `params.py`. Parameters a node does not declare are ignored. An empty value
 keeps the node default. Each argument's description lives on its `Param` in
-`params.py`, and `launch/arena_auditory.launch.py` declares every described
-parameter as a launch argument. The task generator declares only `acoustics`
+`params.py`, and `launch/arena_auditory.launch.py` declares every parameter as
+a launch argument except `env.ns` (declared by hand) and `render.role` (set per
+node). The task generator declares only `acoustics`
 and `auditory.static_sounds`. The arguments are:
 
 | Argument | Node default | Effect |

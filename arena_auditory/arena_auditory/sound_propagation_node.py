@@ -26,7 +26,7 @@ from arena_auditory_msgs.msg import (
 from arena_auditory_msgs.srv import RemoveMicrophone, SpawnMicrophone
 from arena_people_msgs.msg import Pedestrians
 from arena_rclpy_mixins import ArenaMixinNode
-from arena_rclpy_mixins.param_groups import Param, configure
+from arena_rclpy_mixins.params import Param, configure
 from arena_rclpy_mixins.qos import best_effort, latched, reliable
 from arena_rclpy_mixins.transforms import ThreadedTransformListener
 from arena_robots.audio import NS_PER_S, ArraySpec, Vec3, load_array_spec

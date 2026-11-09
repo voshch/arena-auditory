@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import attrs
-from arena_rclpy_mixins.param_groups import configure
+from arena_rclpy_mixins.params import configure
 from arena_simulation_setup.tree.World import Level, parse_world
 
 from arena_auditory.params import PortalGroup, WorldGroup
