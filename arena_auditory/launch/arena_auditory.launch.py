@@ -8,7 +8,7 @@ from launch_ros.actions import Node
 from arena_auditory.params import MotorGroup, MotorModel, RenderRole, all_params
 
 _RESERVED = ("namespace", "hearing", "use_sim_time", "ros_remaps")
-_HEARING_ARRAY_SPEC = {"bus": "", "srp": "four_mic", "seld": "four_mic"}
+_HEARING_ARRAY_SPEC = {"bus": "", "srp": "four_mic", "seld": "four_mic", "call": "four_mic"}
 
 
 def _stack(context: launch.LaunchContext) -> list[launch.LaunchDescriptionEntity]:
@@ -54,7 +54,7 @@ def generate_launch_description() -> launch.LaunchDescription:
         [
             launch.actions.DeclareLaunchArgument("namespace", default_value="", description="Task generator node namespace, the stack nodes live below it."),
             launch.actions.DeclareLaunchArgument("env.ns", default_value="", description="Env namespace of the pedestrian topics."),
-            launch.actions.DeclareLaunchArgument("hearing", default_value="none", choices=["none", *_HEARING_ARRAY_SPEC], description="Robot hearing frontend, srp and seld default array.spec to four_mic."),
+            launch.actions.DeclareLaunchArgument("hearing", default_value="none", choices=["none", *_HEARING_ARRAY_SPEC], description="Robot hearing frontend, srp, seld and call default array.spec to four_mic."),
             *declare_launch_arguments(all_params(), reserved=(MotorGroup.MODEL.name,)),
             launch.actions.DeclareLaunchArgument(MotorGroup.MODEL.name, default_value="", choices=["", *(model.value for model in MotorModel)], description=f"{MotorGroup.MODEL.description} Empty = node default."),
             launch.actions.OpaqueFunction(function=_stack),

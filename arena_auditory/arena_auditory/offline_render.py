@@ -42,6 +42,7 @@ from arena_auditory.render.core import (
     render_block,
     render_inputs_from_json,
 )
+from arena_auditory.synthetic import synthetic
 
 TRACE_TOPIC_SUFFIX = f"/audio/{ArrayStream.RENDER_INPUTS}"
 RAW_TOPIC_SUFFIX = f"/audio/{ArrayStream.RAW}"
@@ -227,6 +228,8 @@ def asset_resolver(sample_rate: int, world: Path | None = None) -> tuple[Callabl
     owners: dict[str, str] = {}
 
     def sample(asset_key: str) -> DecodedSample:
+        if synthetic(asset_key):
+            return decoder.by_key(asset_key)
         try:
             split_sample_key(asset_key)
         except KeyError:

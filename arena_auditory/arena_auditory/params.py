@@ -176,6 +176,8 @@ class RenderGroup(ParamGroup):
     MIN_LEVEL_DB = Param[float]("render.min_level_db", PerRole(array=-120.0, listener=-20.0), parse=finite)
     LOCKSTEP_ENABLED = Param[bool]("render.lockstep.enabled", PerRole(array=True, listener=False))
     CONTINUOUS_MAX_AGE_S = Param[float]("render.continuous.max_age_s", 2.0, parse=positive)
+    BED_ENABLED = Param[bool]("render.bed.enabled", False, description="Add a diffuse ambient bed to every robot array: seamless pink noise from 20 Hz, independent per microphone, in stem_ambient.")
+    BED_LEVEL_DBA = Param[float]("render.bed.level_dba", 40.0, parse=finite, description="A-weighted level of the ambient bed at each array microphone, dB SPL through the array sensitivity.")
 
     def role(self) -> RenderRole:
         return self.ROLE.value
