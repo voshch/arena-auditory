@@ -591,7 +591,7 @@ no more, and it counts as silent again after a non-audible state or
 `<r>/audio/raw_array` and default `auditory.array.spec` to `four_mic`.
 
 ```bash
-export ARENA_WORLD_PATH=$ARENA_DATA_DIR/assets/public/benchmarks/suites/acoustics/worlds
+export ARENA_WORLD_PATH=$ARENA_DATA_DIR/assets/arena-public/suites/acoustics/worlds
 arena launch sim:=gazebo robot:=jackal world:=acoustics_bend_narrow_O \
     task.robots:=scenario task.obstacles:=scenario \
     task.scenario.file:=hearing__world-acoustics_bend_narrow_O__robot-moving__pedestrians-1__ends-a-to-b \
