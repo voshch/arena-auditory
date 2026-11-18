@@ -9,13 +9,13 @@ import attrs
 from arena_auditory_msgs.msg import ContinuousHeardSoundState, HeardSoundEvent
 from arena_rclpy_mixins import ArenaMixinNode, qos
 from arena_rclpy_mixins.lazy import LazyPublisher
+from arena_rclpy_mixins.Time import Time
 from arena_robots.fleet import robot_bindings
 from arena_robots_msgs.msg import SoundDetection
 from arena_runtime_msgs.msg import RobotFleet
 from arena_simulation_setup.tree.assets.sound_catalog import AgentKind, SoundLibrary
 from rclpy.duration import Duration
 from rclpy.publisher import Publisher
-from rclpy.time import Time
 from std_msgs.msg import ColorRGBA, Header
 from visualization_msgs.msg import Marker
 
@@ -90,10 +90,10 @@ class BusNode(ArenaMixinNode):
         if robot is None:
             self._last_audible.pop(key, None)
             return
-        now = self.get_clock().now()
+        now = self.sim_time
         previous = self._last_audible.get(key)
         self._last_audible[key] = now
-        if previous is not None and now - previous <= Duration(seconds=self._bus.CONTINUOUS_GAP_S.value):
+        if previous is not None and now - previous <= Time.from_float(self._bus.CONTINUOUS_GAP_S.value):
             return
         self._enqueue(robot, event)
 
@@ -115,15 +115,15 @@ class BusNode(ArenaMixinNode):
 
     def _enqueue(self, robot: str, msg: HeardSoundEvent) -> None:
         if self._bus.DELAY_ENABLED.value:
-            release = Time.from_msg(msg.header.stamp) + Duration(seconds=float(msg.reception.direct_delay_s))
+            release = Time.from_msg(msg.header.stamp) + Time.from_float(float(msg.reception.direct_delay_s))
         else:
-            release = self.get_clock().now()
+            release = self.sim_time
         self._pending.append(_Pending(release=release, robot=robot, msg=msg))
 
     def _release(self) -> None:
         if not self._pending:
             return
-        now = self.get_clock().now()
+        now = self.sim_time
         due = [item for item in self._pending if item.release <= now]
         self._pending = [item for item in self._pending if item.release > now]
         for item in due:
@@ -155,7 +155,7 @@ class BusNode(ArenaMixinNode):
         r, g, b = kind.color
         marker = Marker()
         marker.header.frame_id = outputs.base_frame
-        marker.header.stamp = self.get_clock().now().to_msg()
+        marker.header.stamp = self.sim_time.to_msg()
         marker.ns = f"{robot}_heard_sound"
         marker.id = 0
         marker.type = Marker.TEXT_VIEW_FACING

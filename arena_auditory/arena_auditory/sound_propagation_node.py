@@ -28,6 +28,7 @@ from arena_people_msgs.msg import Pedestrians
 from arena_rclpy_mixins import ArenaMixinNode
 from arena_rclpy_mixins.params import Param, configure
 from arena_rclpy_mixins.qos import best_effort, latched, reliable
+from arena_rclpy_mixins.Time import Time as SimTime
 from arena_rclpy_mixins.transforms import ThreadedTransformListener
 from arena_robots.audio import NS_PER_S, ArraySpec, Vec3, load_array_spec
 from arena_robots.fleet import RobotBinding, robot_bindings
@@ -224,7 +225,7 @@ class SoundPropagationNode(ArenaMixinNode):
 
     def _stopped(self, previous: ContinuousHeardSoundState) -> ContinuousHeardSoundState:
         stopped = copy.deepcopy(previous)
-        stopped.header.stamp = self.get_clock().now().to_msg()
+        stopped.header.stamp = self.sim_time.to_msg()
         stopped.source.active = False
         stopped.reception.audible = False
         return stopped
@@ -246,12 +247,12 @@ class SoundPropagationNode(ArenaMixinNode):
         self._world_microphones = {microphone.listener_id: microphone for microphone in world.microphones}
         self._continuous_cache.clear()
         self._publish_registry()
-        now_ns = self.get_clock().now().nanoseconds
+        now_ns = self.sim_time.to_nanoseconds()
         max_age_ns = round(self._params.BUFFER_MAX_AGE_S.value * NS_PER_S)
         stale = 0
         while self._pending_events:
             msg, listeners = self._pending_events.popleft()
-            if now_ns - rclpy.time.Time.from_msg(msg.header.stamp).nanoseconds > max_age_ns:
+            if now_ns - SimTime.from_msg(msg.header.stamp).to_nanoseconds() > max_age_ns:
                 stale += 1
                 continue
             self._publish_event(msg, listeners)
@@ -518,7 +519,7 @@ class SoundPropagationNode(ArenaMixinNode):
             return
         position, source_msg, frame = located
         emission = Emission.from_source(source, position)
-        header = Header(stamp=self.get_clock().now().to_msg(), frame_id=frame)
+        header = Header(stamp=self.sim_time.to_msg(), frame_id=frame)
         quantum = self._quantization.value
         source_signature = (
             source.agent_id,
@@ -631,7 +632,7 @@ class SoundPropagationNode(ArenaMixinNode):
         return poses
 
     def _publish_markers(self) -> None:
-        stamp = self.get_clock().now().to_msg()
+        stamp = self.sim_time.to_msg()
         markers = []
         for index, (listener_id, pose) in enumerate(sorted(self._marker_poses().items())):
             x, y, z = pose.position

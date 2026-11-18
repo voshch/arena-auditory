@@ -138,7 +138,7 @@ class SoundPropagationVisualizer(ArenaMixinNode):
     def _marker(self, frame: str, marker_id: int, marker_type: int, lifetime_s: float) -> Marker:
         marker = Marker()
         marker.header.frame_id = frame
-        marker.header.stamp = self.get_clock().now().to_msg()
+        marker.header.stamp = self.sim_time.to_msg()
         marker.id = marker_id
         marker.type = marker_type
         marker.action = Marker.ADD

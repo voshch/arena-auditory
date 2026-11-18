@@ -137,7 +137,7 @@ class RobotEmitterNode(ArenaMixinNode):
                 robot.moving = moving
                 self.get_logger().info(f"robot {name!r} motor {'started' if moving else 'stopped'} at {robot.speed_mps:.3f} m/s")
                 if moving:
-                    robot.program_start_ns = self.get_clock().now().nanoseconds
+                    robot.program_start_ns = self.sim_time.to_nanoseconds()
                 else:
                     robot.inactive_left = INACTIVE_REPEATS
                     self._clear_markers(robot)
@@ -199,7 +199,7 @@ class RobotEmitterNode(ArenaMixinNode):
 
         fill = Marker()
         fill.header.frame_id = robot.binding.base_frame
-        fill.header.stamp = self.get_clock().now().to_msg()
+        fill.header.stamp = self.sim_time.to_msg()
         fill.ns = f"motor_sound_{robot.binding.name}"
         fill.id = base_id
         fill.type = Marker.TRIANGLE_LIST
@@ -227,7 +227,7 @@ class RobotEmitterNode(ArenaMixinNode):
     def _clear_markers(self, robot: _Robot) -> None:
         if not robot.marker_publisher.wanted:
             return
-        stamp = self.get_clock().now().to_msg()
+        stamp = self.sim_time.to_msg()
         base_id = marker_base_id(robot.binding.name)
         markers = MarkerArray()
         for index, namespace in enumerate((f"motor_sound_{robot.binding.name}", f"motor_sound_{robot.binding.name}_outline")):

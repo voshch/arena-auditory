@@ -648,7 +648,7 @@ def test_continuous_receptions_of_one_pass_arrive_together_stamped_at_listener_s
         now = Clock()
         now.clock.sec = sec
         clock_pub.publish(now)
-        _spin_until(rclpy, [driver, propagation], lambda: propagation.get_clock().now().nanoseconds == sec * 1_000_000_000)
+        _spin_until(rclpy, [driver, propagation], lambda: propagation.sim_time.to_nanoseconds() == sec * 1_000_000_000)
 
     def flush(count: int) -> list[ContinuousHeardSoundState]:
         heard.clear()

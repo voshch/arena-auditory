@@ -10,6 +10,7 @@ from dataclasses import dataclass
 
 import rclpy
 from arena_auditory_msgs.msg import HeardSoundEvent
+from arena_rclpy_mixins.Time import TimeNode
 from arena_robots.audio import ArrayStream, array_stream
 from arena_robots_msgs.msg import AudioFrame
 from arena_runtime_msgs.action import RunEpisode
@@ -17,7 +18,6 @@ from arena_runtime_msgs.msg import EpisodeRecord, RobotFleet
 from geometry_msgs.msg import Point
 from rclpy.action import ActionClient
 from rclpy.action.client import ClientGoalHandle
-from rclpy.node import Node
 from rclpy.qos import QoSDurabilityPolicy, QoSProfile, QoSReliabilityPolicy
 from rclpy.task import Future
 from rosgraph_msgs.msg import Clock
@@ -39,7 +39,7 @@ class RobotCoverage:
     injected_reference: bool = False
 
 
-class CaptureWaiter(Node):
+class CaptureWaiter(TimeNode):
     def __init__(
         self,
         duration: float,
@@ -204,7 +204,7 @@ class CaptureWaiter(Node):
         for robot, coverage in self.robots.items():
             if coverage.injected_reference:
                 continue
-            stamp = self.get_clock().now().to_msg()
+            stamp = self.sim_time.to_msg()
             event_id = f"dataset-reference:{self.injected_reference_events}:{stamp.sec}:{stamp.nanosec}"
             for index, channel in enumerate(("front_left", "front_right", "rear_left", "rear_right")):
                 msg = HeardSoundEvent()

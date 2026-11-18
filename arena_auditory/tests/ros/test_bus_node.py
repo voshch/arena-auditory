@@ -41,6 +41,22 @@ def _settle(rclpy, nodes, duration_sec: float = 0.3) -> None:
             rclpy.spin_once(node, timeout_sec=0.02)
 
 
+def _set_sim_time(rclpy, nodes, seconds: float) -> None:
+    from arena_rclpy_mixins.Time import Time
+    from rosgraph_msgs.msg import Clock
+
+    node = nodes[0]
+    publisher = node.create_publisher(Clock, "/clock", 10)
+    target = Time.from_float(seconds)
+    deadline = time.monotonic() + 10.0
+    while node.sim_time != target:
+        assert time.monotonic() < deadline, "sim time never reached the node"
+        publisher.publish(Clock(clock=target.to_msg()))
+        for each in nodes:
+            rclpy.spin_once(each, timeout_sec=0.02)
+    node.destroy_publisher(publisher)
+
+
 def _robot_fleet(robot_name: str, namespace: str, frame: str):
     from arena_runtime_msgs.msg import RobotDescriptor, RobotFleet, RobotState
 
@@ -210,7 +226,8 @@ def test_continuous_source_gives_a_second_detection_after_the_stream_goes_silent
 
     node, consumer, _suffix, _heard_events, found, _markers = bus
     node._cb_continuous(_continuous("robot:jackal"))
-    _settle(rclpy, [node, consumer], 0.4)
+    _settle(rclpy, [node, consumer])
+    _set_sim_time(rclpy, [node, consumer], node.sim_time.to_seconds() + 0.4)
     node._cb_continuous(_continuous("robot:jackal"))
     _spin_until(rclpy, [node, consumer], lambda: len(found) >= 2)
     _settle(rclpy, [node, consumer])

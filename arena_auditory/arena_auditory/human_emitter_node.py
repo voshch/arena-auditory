@@ -87,7 +87,7 @@ class HumanEmitterNode(ArenaMixinNode):
         self._detector.reset()
 
     def _on_pedestrians(self, msg: Pedestrians) -> None:
-        now_s = self.get_clock().now().nanoseconds / NS_PER_S
+        now_s = self.sim_time.to_nanoseconds() / NS_PER_S
         self._detector.update([pedestrian_state(ped) for ped in msg.pedestrians], now_s)
 
     def _occurrence(self, agent_id: int, kind: str) -> int:
@@ -112,7 +112,7 @@ class HumanEmitterNode(ArenaMixinNode):
         level_db = asset.level_db
         if asset.surface == "floor" and floor:
             level_db -= self._materials.surface_damping_db(floor, "floor")
-        stamp = self.get_clock().now().to_msg()
+        stamp = self.sim_time.to_msg()
         source = SourceSpec(
             id=f"human:{ped.id}:{stamp.sec}:{stamp.nanosec}:{next(self._event_counter)}",
             kind=kind_name,

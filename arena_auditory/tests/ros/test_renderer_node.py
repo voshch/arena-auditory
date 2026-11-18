@@ -380,7 +380,7 @@ def test_continuous_channel_past_the_max_age_stops_while_a_fresh_channel_keeps_r
         now = Clock()
         now.clock.sec = 20
         clock_pub.publish(now)
-        _spin_until([driver, node], lambda: node.get_clock().now().nanoseconds == 20_000_000_000)
+        _spin_until([driver, node], lambda: node.sim_time.to_nanoseconds() == 20_000_000_000)
     finally:
         driver.destroy_node()
     assert node.set_parameters([Parameter("render.continuous.max_age_s", value=1.0)])[0].successful

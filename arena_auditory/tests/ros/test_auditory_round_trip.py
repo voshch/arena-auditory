@@ -253,7 +253,7 @@ def test_four_mic_array_renders_and_robot_hearing_hears_the_centroid(rclpy_conte
 
         event = SoundEvent()
         event.header.frame_id = "map"
-        event.header.stamp = driver.get_clock().now().to_msg()
+        event.header.stamp = scene.propagation.sim_time.to_msg()
         event.source = SourceSpec(
             id="human:1:four-mic-regression",
             kind="speech",
@@ -323,7 +323,7 @@ def test_static_sound_keeps_its_authored_height_through_propagation(rclpy_contex
         ).to_msg()
 
         def received() -> bool:
-            state.header.stamp = driver.get_clock().now().to_msg()
+            state.header.stamp = scene.propagation.sim_time.to_msg()
             source_pub.publish(state)
             return any(message.reception.listener_id == "robot:robot1" for message in heard)
 

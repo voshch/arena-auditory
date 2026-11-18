@@ -38,8 +38,7 @@ from arena_runtime_msgs.msg import EpisodeRecord, LockstepChannel, RobotFleet
 from arena_simulation_setup.tree.assets.sound_catalog import AgentKind, SoundAsset, SoundLibrary, Variant
 from builtin_interfaces.msg import Time as TimeMsg
 from geometry_msgs.msg import Point
-from rclpy.clock import Clock, ClockType, JumpThreshold, TimeJump
-from rclpy.duration import Duration
+from rclpy.clock import Clock, ClockType
 from rclpy.publisher import Publisher
 from rclpy.subscription import Subscription
 from std_msgs.msg import ColorRGBA, Float32MultiArray, Header, String
@@ -227,6 +226,7 @@ class RendererNode(ArenaMixinNode):
             max_catchup=max(self._render_conf.MAX_CATCHUP_BLOCKS.value, 1),
         )
         self._stream_start_ns: int | None = None
+        self._last_clock_ns: int | None = None
         self._reported_skipped = 0
         self._render_behind = False
         self._samples: dict[str, DecodedSample] = {}
@@ -268,10 +268,7 @@ class RendererNode(ArenaMixinNode):
             self._select_listener(self._listener_conf.ID.value)
 
         if self._sim_time:
-            self._clock_jump = self.get_clock().create_jump_callback(
-                JumpThreshold(min_forward=Duration(nanoseconds=1), min_backward=None, on_clock_change=False),
-                post_callback=self._on_clock,
-            )
+            self.on_clock(self._on_clock)
         else:
             self.create_timer(self.block_size / self.sample_rate, self._on_steady, clock=self._steady_clock)
         self.create_timer(self._output_conf.RETRY_PERIOD_S.value, self._retry_output, clock=self._steady_clock)
@@ -497,10 +494,11 @@ class RendererNode(ArenaMixinNode):
         if self._wants_output(device) and (self._output is None or not self._output.stats.active):
             self._open_output(device)
 
-    def _on_clock(self, _jump: TimeJump) -> None:
-        if not self._streaming:
+    def _on_clock(self, now: Time) -> None:
+        now_ns = now.to_nanoseconds()
+        previous, self._last_clock_ns = self._last_clock_ns, now_ns
+        if not self._streaming or (previous is not None and now_ns <= previous):
             return
-        now_ns = self.get_clock().now().nanoseconds
         if self._stream_start_ns is None:
             self._stream_start_ns = now_ns
             self._cursor.start_ns = now_ns
@@ -743,7 +741,7 @@ class RendererNode(ArenaMixinNode):
 
     def _expire_receptions(self, target: RenderTarget) -> None:
         """Stop each channel of a continuous source whose latest reception is older than render.continuous.max_age_s of sim time."""
-        oldest_ns = self.get_clock().now().nanoseconds - round(self._render_conf.CONTINUOUS_MAX_AGE_S.value * 1e9)
+        oldest_ns = self.sim_time.to_nanoseconds() - round(self._render_conf.CONTINUOUS_MAX_AGE_S.value * 1e9)
         for source_id, gate in tuple(target.gates.items()):
             stale = [channel for channel, stamp_ns in gate.stamps.items() if stamp_ns < oldest_ns]
             if not stale:
@@ -951,7 +949,7 @@ class RendererNode(ArenaMixinNode):
             room = self._room(reception.rir_key)
             if room.silent:
                 continue
-            elapsed = max(self.get_clock().now().nanoseconds - source.program_start_ns, 0)
+            elapsed = max(self.sim_time.to_nanoseconds() - source.program_start_ns, 0)
             source_id, channel = key
             target.continuous_programs[key] = program_key(source)
             target.continuous[key] = ContinuousInput(
@@ -1105,7 +1103,7 @@ class RendererNode(ArenaMixinNode):
             frame = self._mount_frame(target)
             if publisher is None or not frame or not publisher.wanted:
                 continue
-            header = Header(frame_id=frame, stamp=self.get_clock().now().to_msg())
+            header = Header(frame_id=frame, stamp=self.sim_time.to_msg())
             markers = []
             for index, mic in enumerate(self.spec.mics):
                 label = Marker(header=header, ns="microphone_levels", id=index, type=Marker.TEXT_VIEW_FACING, action=Marker.ADD)
