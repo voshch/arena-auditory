@@ -122,6 +122,7 @@ class _Scene:
         self.driver = rclpy.create_node(f"round_trip_driver_{self.suffix}", namespace=self.namespace)
         self.nodes.append(self.driver)
         self.propagation = _build(event_loop, SoundPropagationNode, self.namespace, {"propagation.backend": "legacy", "propagation.threshold_db": 10.0, "array.spec": array_spec})
+        event_loop.run_until_complete(self.propagation.setup())
         self.nodes.append(self.propagation)
         self._fleet_pub = self.driver.create_publisher(RobotFleet, f"{self.namespace}/state/robots", latched(1))
         self._map_pub = self.driver.create_publisher(OccupancyGrid, f"{self.namespace}/map", latched(1))

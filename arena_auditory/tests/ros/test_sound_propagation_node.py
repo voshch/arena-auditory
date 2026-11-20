@@ -23,8 +23,8 @@ def _ros_gate():
     pytest.importorskip("arena_runtime_msgs.msg")
 
 
-def _launch(parameters: dict[str, object] | None = None, cli_args: list[str] | None = None):
-    """SoundPropagationNode below a unique namespace with parameters given the way a launch file passes them."""
+def _launch(parameters: dict[str, object] | None = None, cli_args: list[str] | None = None, *, run: bool = False):
+    """SoundPropagationNode below a unique namespace with parameters given the way a launch file passes them, its propagation worker started when run."""
     from arena_auditory.sound_propagation_node import SoundPropagationNode
     from arena_rclpy_mixins import ArenaMixinNode
     from rclpy.parameter import Parameter
@@ -40,7 +40,10 @@ def _launch(parameters: dict[str, object] | None = None, cli_args: list[str] | N
         pass
 
     async def construct() -> LaunchedPropagation:
-        return LaunchedPropagation()
+        node = LaunchedPropagation()
+        if run:
+            await node.setup()
+        return node
 
     return asyncio.run(construct())
 
@@ -175,7 +178,7 @@ def test_sound_event_round_trips_to_heard_sound_event(rclpy_context):
     from arena_rclpy_mixins.qos import reliable
     from rclpy.qos import DurabilityPolicy
 
-    propagation = _launch({"propagation.backend": "legacy", "pedestrian_listeners.enabled": True, "pedestrian_listeners.discrete.enabled": True})
+    propagation = _launch({"propagation.backend": "legacy", "pedestrian_listeners.enabled": True, "pedestrian_listeners.discrete.enabled": True}, run=True)
     namespace = propagation.get_namespace()
     peer = rclpy.create_node(f"sound_event_peer_{uuid.uuid4().hex[:8]}", namespace=namespace)
     received: list[HeardSoundEvent] = []
@@ -623,6 +626,76 @@ def test_continuous_flush_stops_at_its_budget_and_keeps_the_rest_pending(rclpy_c
         assert {source_id for source_id, _ in propagation._last_continuous} == set(source_ids)
         assert propagation._last_continuous[(left[-1], f"robot:{robot}")].source.position.x == pytest.approx(9.0)
     finally:
+        propagation.destroy_node()
+
+
+def test_worker_propagates_queued_sound_events_and_the_executor_publishes_them(rclpy_context):
+    import rclpy
+    from arena_auditory_msgs.msg import HeardSoundEvent, SoundEvent
+    from arena_rclpy_mixins.qos import reliable
+
+    propagation = _launch({"propagation.backend": "legacy"}, run=True)
+    peer = rclpy.create_node(f"worker_peer_{uuid.uuid4().hex[:8]}")
+    heard: list[HeardSoundEvent] = []
+    peer.create_subscription(HeardSoundEvent, propagation._heard_pub.topic_name, heard.append, reliable(50))
+    robot = _robot_name()
+    source_ids = {f"speech_{index}" for index in range(10)}
+
+    try:
+        _load_map(propagation)
+        _place(propagation, f"{robot}/base_link", 10.0, 1.0)
+        propagation._on_fleet(_fleet(robot))
+        _spin_until(rclpy, [peer, propagation], lambda: propagation._heard_pub.get_subscription_count() > 0)
+        for index, source_id in enumerate(sorted(source_ids)):
+            event = SoundEvent(source=_source(source_id, position=(1.0 + 0.1 * index, 1.0, 1.0)))
+            event.header.frame_id = "map"
+            propagation._on_sound_event(event)
+
+        assert propagation._worker.is_alive()
+        _spin_until(rclpy, [peer, propagation], lambda: {msg.source.id for msg in heard} >= source_ids)
+        assert propagation._jobs.empty()
+    finally:
+        peer.destroy_node()
+        propagation.destroy_node()
+
+
+def test_sound_event_older_than_the_buffer_age_is_dropped(rclpy_context):
+    import rclpy
+    from arena_auditory_msgs.msg import HeardSoundEvent, SoundEvent
+    from arena_rclpy_mixins.qos import reliable
+    from rosgraph_msgs.msg import Clock
+
+    clock_topic = f"/clock_{uuid.uuid4().hex[:8]}"
+    propagation = _launch({"propagation.backend": "legacy", "propagation.buffer.max_age_s": 1.0, "use_sim_time": True}, cli_args=["--ros-args", "-r", f"/clock:={clock_topic}"])
+    driver = rclpy.create_node(f"stale_driver_{uuid.uuid4().hex[:8]}")
+    clock_pub = driver.create_publisher(Clock, clock_topic, 10)
+    heard: list[HeardSoundEvent] = []
+    driver.create_subscription(HeardSoundEvent, propagation._heard_pub.topic_name, heard.append, reliable(50))
+    robot = _robot_name()
+
+    try:
+        _load_map(propagation)
+        _place(propagation, f"{robot}/base_link", 10.0, 1.0)
+        propagation._on_fleet(_fleet(robot))
+        _spin_until(rclpy, [driver, propagation], lambda: clock_pub.get_subscription_count() > 0 and propagation._heard_pub.get_subscription_count() > 0)
+        now = Clock()
+        now.clock.sec = 50
+        clock_pub.publish(now)
+        _spin_until(rclpy, [driver, propagation], lambda: propagation.sim_time.to_nanoseconds() == 50 * 1_000_000_000)
+
+        for source_id, sec in (("speech_stale", 48), ("speech_fresh", 50)):
+            event = SoundEvent(source=_source(source_id, position=(8.0, 1.0, 1.0)))
+            event.header.frame_id = "map"
+            event.header.stamp.sec = sec
+            propagation._on_sound_event(event)
+        _spin_until(rclpy, [driver], lambda: len(heard) >= 1)
+        deadline = time.monotonic() + 0.3
+        while time.monotonic() < deadline:
+            rclpy.spin_once(driver, timeout_sec=0.02)
+
+        assert {msg.source.id for msg in heard} == {"speech_fresh"}
+    finally:
+        driver.destroy_node()
         propagation.destroy_node()
 
 

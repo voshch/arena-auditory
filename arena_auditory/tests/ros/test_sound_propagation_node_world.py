@@ -41,7 +41,9 @@ def _launch(parameters: dict[str, object] | None = None):
         pass
 
     async def construct() -> LaunchedPropagation:
-        return LaunchedPropagation()
+        node = LaunchedPropagation()
+        await node.setup()
+        return node
 
     return asyncio.run(construct())
 

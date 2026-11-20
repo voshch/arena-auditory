@@ -57,7 +57,9 @@ def _propagation(tg: str):
         pass
 
     async def construct():
-        return Propagation()
+        node = Propagation()
+        await node.setup()
+        return node
 
     return asyncio.run(construct())
 

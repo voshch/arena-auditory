@@ -6,9 +6,12 @@ import copy
 import functools
 import json
 import math
+import queue
+import threading
 import time
+import traceback
 from collections import OrderedDict, deque
-from collections.abc import Callable, Hashable, Iterable, Iterator
+from collections.abc import Callable, Hashable
 
 import attrs
 import rclpy.parameter
@@ -64,6 +67,9 @@ from arena_auditory.world_tracker import WorldTracker
 
 CONTINUOUS_FLUSH_PERIOD_S = 0.05
 CONTINUOUS_FLUSH_BUDGET_S = 0.01
+RESULT_PERIOD_S = 0.02
+WORKER_POLL_S = 0.05
+WORKER_JOIN_TIMEOUT_S = 10.0
 MARKER_PERIOD_S = 0.25
 WARNING_PERIOD_S = 5.0
 
@@ -96,6 +102,30 @@ class _MarkerPose:
     frame: str
     yaw_rad: float = 0.0
     color: ColorRGBA = DEFAULT_MIC_COLOR
+
+
+@attrs.frozen(eq=False)
+class _Job:
+    """One propagation pass with everything the worker needs, built on the executor."""
+
+    emission: Emission
+    listeners: tuple[Listener, ...]
+    scene: PropagationScene
+    config: PropagationConfig
+    generation: int
+    header: Header
+    source_msg: SoundSource
+    event_stamp: Time | None = None
+    max_age_s: float = math.inf
+    source_id: str = ""
+    signatures: dict[str, tuple[Hashable, ...]] = attrs.field(factory=dict)
+    cached: tuple[Reception, ...] = ()
+
+
+@attrs.frozen(eq=False)
+class _Result:
+    job: _Job
+    receptions: tuple[tuple[Listener, Reception], ...]
 
 
 def _finite(*values: float) -> bool:
@@ -142,6 +172,17 @@ class SoundPropagationNode(ArenaMixinNode):
         self._propagator = Propagator(config, default_catalog(), warn=lambda message: self.get_logger().warning(message))
         if self._propagator.init_fallback_reason:
             self.get_logger().warning(f"propagation falls back to level3: {self._propagator.init_fallback_reason}")
+        self._config = config
+        self._scene_snapshot = self._propagator.scene
+        self._generation = 0
+        self._jobs: queue.SimpleQueue[_Job] = queue.SimpleQueue()
+        self._results: queue.SimpleQueue[_Result] = queue.SimpleQueue()
+        self._in_flight: set[str] = set()
+        self._stale_events = 0
+        self._summary_period_s = self.conf.Diagnostics.PERIOD_S.value
+        self._stopping = threading.Event()
+        self._started = False
+        self._worker = threading.Thread(target=self._propagate_forever, name="propagation", daemon=True)
 
         self._tf_buffer = tf2_ros.Buffer()
         self._tf_listener = ThreadedTransformListener(self._tf_buffer)
@@ -179,7 +220,7 @@ class SoundPropagationNode(ArenaMixinNode):
         self.create_subscription(RobotFleet, STATE_ROBOTS, self._on_fleet, latched(1))
         self.create_timer(CONTINUOUS_FLUSH_PERIOD_S, self._flush_continuous)
         self.create_timer(MARKER_PERIOD_S, self._publish_markers)
-        self.create_timer(self.conf.Diagnostics.PERIOD_S.value, lambda: self.get_logger().debug(self._propagator.cache_summary()))
+        self.wall_timer(RESULT_PERIOD_S, self._drain_results)
 
         self.add_param_callback(self._params.ENABLED.name, self._on_enabled)
         self.add_param_callback(self._listener_id.name, self._on_listener_selected)
@@ -189,18 +230,27 @@ class SoundPropagationNode(ArenaMixinNode):
         self._on_listener_selected(self._listener_id.value)
         self._publish_registry()
 
+    async def setup(self) -> None:
+        self._started = True
+        self._worker.start()
+
     def destroy_node(self) -> None:
+        self._stopping.set()
+        if self._worker.is_alive():
+            self._worker.join(timeout=WORKER_JOIN_TIMEOUT_S)
         self._tracker.destroy()
         self._tf_listener.close()
         super().destroy_node()
 
     def _retune(self, param: Param[float] | Param[int], value: object) -> bool:
         parsed = param.parse(value) if param.parse is not None else value
-        self._propagator.config = attrs.evolve(self._propagator.config, **{param.field: parsed})
+        self._config = attrs.evolve(self._config, **{param.field: parsed})
         self._continuous_cache.clear()
+        self._generation += 1
         return True
 
     def _on_enabled(self, value: object) -> bool:
+        self._generation += 1
         if not bool(value):
             self._stop_outputs(lambda _listener_id: False, forget=False)
         return True
@@ -208,6 +258,7 @@ class SoundPropagationNode(ArenaMixinNode):
     def _on_listener_selected(self, value: object) -> bool:
         selected = str(value).strip()
         leaving_viewport = selected not in VIEWPORT_IDS
+        self._generation += 1
         self._stop_outputs(
             lambda listener_id: ListenerId.parse(listener_id).kind is not ListenerKind.MICROPHONE or listener_id == selected or (leaving_viewport and listener_id in VIEWPORT_IDS),
             forget=False,
@@ -246,6 +297,7 @@ class SoundPropagationNode(ArenaMixinNode):
     def _on_world_ready(self, world: AcousticWorld) -> None:
         self._world_microphones = {microphone.listener_id: microphone for microphone in world.microphones}
         self._continuous_cache.clear()
+        self._generation += 1
         self._publish_registry()
         now_ns = self.sim_time.to_nanoseconds()
         max_age_ns = round(self._params.BUFFER_MAX_AGE_S.value * NS_PER_S)
@@ -255,11 +307,12 @@ class SoundPropagationNode(ArenaMixinNode):
             if now_ns - SimTime.from_msg(msg.header.stamp).to_nanoseconds() > max_age_ns:
                 stale += 1
                 continue
-            self._publish_event(msg, listeners)
+            self._submit_event(msg, listeners)
         if stale:
             self.get_logger().info(f"dropped {stale} buffered sound events older than {self._params.BUFFER_MAX_AGE_S.value} s at world ready")
 
     def _on_world_clear(self) -> None:
+        self._generation += 1
         self._announced_impulses.clear()
         self._world_microphones.clear()
         self._spawned_microphones.clear()
@@ -269,6 +322,7 @@ class SoundPropagationNode(ArenaMixinNode):
         self._publish_registry()
 
     def _on_episode(self, _episode_id: int) -> None:
+        self._generation += 1
         self._announced_impulses.clear()
         self._spawned_microphones.clear()
         self._spawned_index = 0
@@ -277,22 +331,22 @@ class SoundPropagationNode(ArenaMixinNode):
         self._publish_registry()
 
     def _scene(self) -> PropagationScene:
-        scene = self._propagator.scene
+        scene = self._scene_snapshot
         if scene.world is not self._tracker.world or scene.occupancy is not self._tracker.occupancy:
-            scene = PropagationScene(world=self._tracker.world, occupancy=self._tracker.occupancy)
-            self._propagator.set_scene(scene)
+            scene = self._scene_snapshot = PropagationScene(world=self._tracker.world, occupancy=self._tracker.occupancy)
         return scene
 
     def _acoustic_frame(self) -> str | None:
         occupancy = self._tracker.occupancy
         return occupancy.frame_id if occupancy is not None else None
 
-    def _warn_throttled(self, key: tuple[str, ...], message: str) -> None:
+    def _warn_throttled(self, key: tuple[str, ...], message: str) -> bool:
         now = time.monotonic()
         if now - self._warning_times.get(key, -math.inf) < WARNING_PERIOD_S:
-            return
+            return False
         self._warning_times[key] = now
         self.get_logger().warning(message)
+        return True
 
     def _transform(self, source_frame: str, target_frame: str, entity: str) -> Transform | None:
         source_frame = source_frame.strip().lstrip("/")
@@ -413,11 +467,88 @@ class SoundPropagationNode(ArenaMixinNode):
             source_msg.position = to_point(position)
         return position, source_msg, frame
 
-    def _propagate_many(self, emission: Emission, listeners: Iterable[Listener]) -> Iterator[tuple[Listener, Reception]]:
-        self._scene()
-        for listener, reception in self._propagator.propagate_many(emission, listeners):
-            self._report_route(emission, listener, reception)
-            yield listener, reception
+    def _submit(self, job: _Job) -> None:
+        """Hands job to the worker once setup started it, else propagates it here."""
+        if self._started:
+            self._jobs.put(job)
+            return
+        try:
+            result = self._compute(job)
+        finally:
+            self._in_flight.discard(job.source_id)
+        if result is not None:
+            self._apply(result)
+
+    def _propagate_forever(self) -> None:
+        """Worker loop that owns the propagator and computes every job off the executor thread."""
+        next_summary = time.monotonic() + self._summary_period_s
+        while not self._stopping.is_set():
+            try:
+                try:
+                    job = self._jobs.get(timeout=WORKER_POLL_S)
+                except queue.Empty:
+                    job = None
+                result = self._compute(job) if job is not None else None
+                if result is not None:
+                    self._results.put(result)
+                if time.monotonic() >= next_summary:
+                    next_summary = time.monotonic() + self._summary_period_s
+                    self.get_logger().debug(self._propagator.cache_summary())
+            except Exception:
+                if self._stopping.is_set():
+                    return
+                self.get_logger().error(f"propagation worker failed: {traceback.format_exc()}")
+                self.request_shutdown("propagation worker failed")
+                return
+
+    def _compute(self, job: _Job) -> _Result | None:
+        """Receptions of job, None for a sound event older than its buffer age."""
+        stamp_ns = SimTime.from_msg(job.event_stamp).to_nanoseconds() if job.event_stamp is not None else 0
+        if stamp_ns and self.sim_time.to_nanoseconds() - stamp_ns > job.max_age_s * NS_PER_S:
+            self._stale_events += 1
+            if self._warn_throttled(("events", "stale"), f"dropped {self._stale_events} sound events older than {job.max_age_s} s, propagation falls behind"):
+                self._stale_events = 0
+            return None
+        if self._propagator.config is not job.config:
+            self._propagator.config = job.config
+        if self._propagator.scene is not job.scene:
+            self._propagator.set_scene(job.scene)
+        receptions: list[tuple[Listener, Reception]] = []
+        for listener, reception in self._propagator.propagate_many(job.emission, job.listeners):
+            if self._stopping.is_set():
+                return None
+            receptions.append((listener, reception))
+            self._report_route(job.emission, listener, reception)
+            if reception.impulse is not None:
+                self._propagator.impulses.put(reception.impulse)
+        return _Result(job, tuple(receptions))
+
+    def _drain_results(self) -> None:
+        while True:
+            try:
+                result = self._results.get_nowait()
+            except queue.Empty:
+                return
+            self._apply(result)
+
+    def _apply(self, result: _Result) -> None:
+        """Publishes the receptions of a job unless the world, episode, settings or listeners changed since it was built."""
+        job = result.job
+        self._in_flight.discard(job.source_id)
+        if job.generation != self._generation:
+            return
+        if job.event_stamp is not None:
+            for _, reception in result.receptions:
+                if reception.audible or self._params.INAUDIBLE_ENABLED.value:
+                    self._publish_impulse(reception, job.event_stamp)
+                    self._heard_pub.publish(reception.heard_msg(job.header, job.source_msg))
+            return
+        receptions = list(job.cached)
+        for listener, reception in result.receptions:
+            self._continuous_cache[(job.source_id, listener.id)] = (job.signatures[listener.id], reception)
+            receptions.append(reception)
+        for reception in receptions:
+            self._publish_continuous(job.source_id, reception, job.header, job.source_msg)
 
     def _report_route(self, emission: Emission, listener: Listener, reception: Reception) -> None:
         route = (reception.backend, reception.fallback_reason, reception.source_zone, reception.listener_zone)
@@ -437,7 +568,6 @@ class SoundPropagationNode(ArenaMixinNode):
         impulse = reception.impulse
         if impulse is None:
             return
-        self._propagator.impulses.put(impulse)
         if impulse.key in self._announced_impulses:
             return
         self._announced_impulses[impulse.key] = None
@@ -460,7 +590,7 @@ class SoundPropagationNode(ArenaMixinNode):
         source = self._source_spec(msg.source)
         if source is None:
             return
-        if self._tracker.world is None and self._propagator.config.backend is BackendName.PYROOMACOUSTICS and self._params.BUFFER_ENABLED.value:
+        if self._tracker.world is None and self._config.backend is BackendName.PYROOMACOUSTICS and self._params.BUFFER_ENABLED.value:
             maximum = max(self._params.BUFFER_SIZE.value, 1)
             if len(self._pending_events) >= maximum:
                 dropped, _ = self._pending_events.popleft()
@@ -468,9 +598,9 @@ class SoundPropagationNode(ArenaMixinNode):
             listeners = self._listeners_for(source, include_peds=self._params.PEDESTRIAN_LISTENERS_DISCRETE_ENABLED.value) if self._acoustic_frame() is not None else None
             self._pending_events.append((msg, listeners))
             return
-        self._publish_event(msg, self._listeners_for(source, include_peds=self._params.PEDESTRIAN_LISTENERS_DISCRETE_ENABLED.value))
+        self._submit_event(msg, self._listeners_for(source, include_peds=self._params.PEDESTRIAN_LISTENERS_DISCRETE_ENABLED.value))
 
-    def _publish_event(self, msg: SoundEvent, listeners: dict[str, Listener] | None) -> None:
+    def _submit_event(self, msg: SoundEvent, listeners: dict[str, Listener] | None) -> None:
         source = self._source_spec(msg.source)
         if source is None:
             return
@@ -482,10 +612,19 @@ class SoundPropagationNode(ArenaMixinNode):
             listeners = self._listeners_for(source, include_peds=self._params.PEDESTRIAN_LISTENERS_DISCRETE_ENABLED.value)
         emission = Emission.from_source(source, position)
         header = Header(stamp=msg.header.stamp, frame_id=frame)
-        receptions = [reception for _, reception in self._propagate_many(emission, listeners.values()) if reception.audible or self._params.INAUDIBLE_ENABLED.value]
-        for reception in receptions:
-            self._publish_impulse(reception, msg.header.stamp)
-            self._heard_pub.publish(reception.heard_msg(header, source_msg))
+        self._submit(
+            _Job(
+                emission=emission,
+                listeners=tuple(listeners.values()),
+                scene=self._scene(),
+                config=self._config,
+                generation=self._generation,
+                header=header,
+                source_msg=source_msg,
+                event_stamp=msg.header.stamp,
+                max_age_s=self._params.BUFFER_MAX_AGE_S.value,
+            )
+        )
 
     def _on_continuous_source(self, msg: ContinuousAudioSourceState) -> None:
         if not self._params.ENABLED.value or not msg.source.kind.strip():
@@ -500,15 +639,18 @@ class SoundPropagationNode(ArenaMixinNode):
         self._pending_continuous = {}
         if not self._params.ENABLED.value:
             return
-        if self._propagator.config.backend is BackendName.PYROOMACOUSTICS and self._tracker.world is None:
+        if self._config.backend is BackendName.PYROOMACOUSTICS and self._tracker.world is None:
             return
         deadline = time.monotonic() + CONTINUOUS_FLUSH_BUDGET_S
+        waiting = {source_id: state for source_id, state in pending.items() if source_id in self._in_flight}
+        pending = {source_id: state for source_id, state in pending.items() if source_id not in self._in_flight}
         for flushed, (source_id, state) in enumerate(tuple(pending.items())):
             if flushed and time.monotonic() >= deadline:
-                self._pending_continuous = pending | self._pending_continuous
+                self._pending_continuous = waiting | pending | self._pending_continuous
                 return
             del pending[source_id]
             self._flush_source(state)
+        self._pending_continuous = waiting | self._pending_continuous
 
     def _flush_source(self, state: ContinuousAudioSourceState) -> None:
         source = self._source_spec(state.source)
@@ -544,11 +686,25 @@ class SoundPropagationNode(ArenaMixinNode):
                 receptions.append(attrs.evolve(cached[1], listener=listener))
             else:
                 misses.append(listener)
-        for listener, reception in self._propagate_many(emission, misses):
-            self._continuous_cache[(source.id, listener.id)] = (signature(listener), reception)
-            receptions.append(reception)
-        for reception in receptions:
-            self._publish_continuous(source.id, reception, header, source_msg)
+        if not misses:
+            for reception in receptions:
+                self._publish_continuous(source.id, reception, header, source_msg)
+            return
+        self._in_flight.add(source.id)
+        self._submit(
+            _Job(
+                emission=emission,
+                listeners=tuple(misses),
+                scene=self._scene(),
+                config=self._config,
+                generation=self._generation,
+                header=header,
+                source_msg=source_msg,
+                source_id=source.id,
+                signatures={listener.id: signature(listener) for listener in misses},
+                cached=tuple(receptions),
+            )
+        )
 
     def _publish_continuous(self, source_id: str, reception: Reception, header: Header, source_msg: SoundSource) -> None:
         key = (source_id, reception.listener.id)
@@ -726,6 +882,7 @@ class SoundPropagationNode(ArenaMixinNode):
                 response.error_msg = f"unknown runtime microphone {listener_id!r}"
             return response
         self._spawned_microphones.pop(listener_id)
+        self._generation += 1
         if str(self._listener_id.value).strip() == listener_id:
             self.set_parameters([rclpy.parameter.Parameter(self._listener_id.name, value="")])
         self._stop_outputs(lambda candidate: candidate != listener_id, forget=True)
