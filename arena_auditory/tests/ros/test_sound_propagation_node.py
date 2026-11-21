@@ -629,7 +629,7 @@ def test_continuous_flush_stops_at_its_budget_and_keeps_the_rest_pending(rclpy_c
         propagation.destroy_node()
 
 
-def test_worker_propagates_queued_sound_events_and_the_executor_publishes_them(rclpy_context):
+def test_propagation_process_propagates_queued_sound_events_and_the_executor_publishes_them(rclpy_context):
     import rclpy
     from arena_auditory_msgs.msg import HeardSoundEvent, SoundEvent
     from arena_rclpy_mixins.qos import reliable
@@ -651,9 +651,9 @@ def test_worker_propagates_queued_sound_events_and_the_executor_publishes_them(r
             event.header.frame_id = "map"
             propagation._on_sound_event(event)
 
-        assert propagation._worker.is_alive()
+        assert len(propagation._children) == 2 and all(child.process.is_alive() for child in propagation._children)
         _spin_until(rclpy, [peer, propagation], lambda: {msg.source.id for msg in heard} >= source_ids)
-        assert propagation._jobs.empty()
+        assert not propagation._sent
     finally:
         peer.destroy_node()
         propagation.destroy_node()
@@ -749,4 +749,47 @@ def test_continuous_receptions_of_one_pass_arrive_together_stamped_at_listener_s
             assert {(message.header.stamp.sec, message.header.stamp.nanosec) for message in received} == {(sec, 0)}
     finally:
         driver.destroy_node()
+        propagation.destroy_node()
+
+
+@pytest.mark.parametrize("invalidation", ["none", "disable", "deselect", "remove_microphone", "episode", "world_clear"])
+def test_continuous_pass_finished_after_an_invalidation_is_never_published(rclpy_context, invalidation: str):
+    from arena_auditory_msgs.srv import RemoveMicrophone
+    from rclpy.parameter import Parameter
+
+    propagation = _launch({"propagation.backend": "legacy"}, run=True)
+    state = _continuous("environment:radio", position=(5.0, 5.0, 1.0))
+
+    try:
+        _load_map(propagation)
+        microphone = _spawn(propagation, 2.0, 2.0, 1.0)
+        assert _select(propagation, microphone.listener_id)
+        key = (state.source.id, microphone.listener_id)
+        propagation._on_continuous_source(state)
+        propagation._flush_continuous()
+        deadline = time.monotonic() + 10.0
+        while propagation._outcomes.empty():
+            assert time.monotonic() < deadline, "the worker never finished the pass"
+            time.sleep(0.01)
+
+        if invalidation == "disable":
+            assert propagation.set_parameters([Parameter("propagation.enabled", value=False)])[0].successful
+        elif invalidation == "deselect":
+            assert _select(propagation, "")
+        elif invalidation == "remove_microphone":
+            assert propagation._remove_microphone(RemoveMicrophone.Request(listener_id=microphone.listener_id), RemoveMicrophone.Response()).success
+        elif invalidation == "episode":
+            propagation._on_episode(2)
+        elif invalidation == "world_clear":
+            propagation._on_world_clear()
+        propagation._drain_results()
+
+        if invalidation == "none":
+            assert propagation._last_continuous[key].source.active is True
+            assert key in propagation._continuous_cache
+        else:
+            assert key not in propagation._continuous_cache
+            assert key not in propagation._last_continuous or propagation._last_continuous[key].source.active is False
+        assert state.source.id not in propagation._in_flight
+    finally:
         propagation.destroy_node()

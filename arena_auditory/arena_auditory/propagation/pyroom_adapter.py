@@ -34,6 +34,7 @@ RAY_TRACING = False
 RANDOMIZED_ISM = False
 MAX_RANDOM_DISPLACEMENT_M = 0.08
 MINIMUM_PHASE = False
+RIR_BUILDER_THREADS = 1
 ROOM_BOUNDARY_TOLERANCE_M = 0.35
 ROOM_BOUNDARY_INSET_M = 0.01
 
@@ -176,12 +177,15 @@ def _reset_room(built: BuiltPyroom) -> None:
     room._init_room_engine(room.walls, list(built.obstructing_walls))
 
 
+@functools.cache
 def _load_pyroomacoustics() -> ModuleType:
-    """Import pyroomacoustics on first use. Raises PyroomacousticsUnavailableError."""
+    """Import pyroomacoustics on first use, its RIR builder on RIR_BUILDER_THREADS threads. Raises PyroomacousticsUnavailableError."""
     try:
-        return import_module("pyroomacoustics")
+        module = import_module("pyroomacoustics")
     except ImportError as exc:
         raise PyroomacousticsUnavailableError("pyroomacoustics is required for acoustic RIR rendering but is not installed in the current Python environment") from exc
+    module.constants.set("num_threads", RIR_BUILDER_THREADS)
+    return module
 
 
 def _coefficient_description(

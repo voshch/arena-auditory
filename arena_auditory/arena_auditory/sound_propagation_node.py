@@ -4,14 +4,17 @@ from __future__ import annotations
 
 import copy
 import functools
+import itertools
 import json
 import math
+import multiprocessing
+import pickle
 import queue
-import threading
 import time
-import traceback
 from collections import OrderedDict, deque
 from collections.abc import Callable, Hashable
+from multiprocessing.process import BaseProcess
+from multiprocessing.queues import Queue
 
 import attrs
 import rclpy.parameter
@@ -61,6 +64,7 @@ from arena_auditory.constants import (
 from arena_auditory.materials import default_catalog
 from arena_auditory.params import BackendName, Configuration, Level3Group, PropagationGroup
 from arena_auditory.propagation import IMPULSE_WINDOW, Emission, Listener, PortalConfig, PropagationConfig, PropagationScene, Propagator, Reception, RirConfig, to_point
+from arena_auditory.propagation.process import Outcome, Status, Task, run, serve
 from arena_auditory.shared import ListenerId, ListenerKind, MicrophoneScope, SourceSpec
 from arena_auditory.world import AcousticWorld, WorldMicrophoneSpec, parse_robot_microphones
 from arena_auditory.world_tracker import WorldTracker
@@ -68,8 +72,7 @@ from arena_auditory.world_tracker import WorldTracker
 CONTINUOUS_FLUSH_PERIOD_S = 0.05
 CONTINUOUS_FLUSH_BUDGET_S = 0.01
 RESULT_PERIOD_S = 0.02
-WORKER_POLL_S = 0.05
-WORKER_JOIN_TIMEOUT_S = 10.0
+PROCESS_JOIN_TIMEOUT_S = 10.0
 MARKER_PERIOD_S = 0.25
 WARNING_PERIOD_S = 5.0
 
@@ -106,7 +109,7 @@ class _MarkerPose:
 
 @attrs.frozen(eq=False)
 class _Job:
-    """One propagation pass with everything the worker needs, built on the executor."""
+    """One propagation pass with everything the propagation process needs, built on the executor."""
 
     emission: Emission
     listeners: tuple[Listener, ...]
@@ -122,10 +125,12 @@ class _Job:
     cached: tuple[Reception, ...] = ()
 
 
-@attrs.frozen(eq=False)
-class _Result:
-    job: _Job
-    receptions: tuple[tuple[Listener, Reception], ...]
+@attrs.define(eq=False)
+class _Child:
+    process: BaseProcess
+    tasks: Queue[bytes | None]
+    sent_scene: PropagationScene | None = None
+    outstanding: int = 0
 
 
 def _finite(*values: float) -> bool:
@@ -174,15 +179,21 @@ class SoundPropagationNode(ArenaMixinNode):
             self.get_logger().warning(f"propagation falls back to level3: {self._propagator.init_fallback_reason}")
         self._config = config
         self._scene_snapshot = self._propagator.scene
+        self._local_scene: PropagationScene | None = None
         self._generation = 0
-        self._jobs: queue.SimpleQueue[_Job] = queue.SimpleQueue()
-        self._results: queue.SimpleQueue[_Result] = queue.SimpleQueue()
         self._in_flight: set[str] = set()
         self._stale_events = 0
-        self._summary_period_s = self.conf.Diagnostics.PERIOD_S.value
-        self._stopping = threading.Event()
-        self._started = False
-        self._worker = threading.Thread(target=self._propagate_forever, name="propagation", daemon=True)
+        self._local_warnings: list[str] = []
+        self._cache_summary = ""
+        self._spawn = multiprocessing.get_context("spawn")
+        self._outcomes: Queue[bytes] = self._spawn.Queue()
+        self._now_ns = self._spawn.Value("q", 0)
+        self._shared_generation = self._spawn.Value("q", 0)
+        self._children: list[_Child] = []
+        self._job_ids = itertools.count()
+        self._sent: OrderedDict[int, tuple[_Job, _Child]] = OrderedDict()
+        self._done: dict[int, Outcome] = {}
+        self._lost = False
 
         self._tf_buffer = tf2_ros.Buffer()
         self._tf_listener = ThreadedTransformListener(self._tf_buffer)
@@ -221,6 +232,7 @@ class SoundPropagationNode(ArenaMixinNode):
         self.create_timer(CONTINUOUS_FLUSH_PERIOD_S, self._flush_continuous)
         self.create_timer(MARKER_PERIOD_S, self._publish_markers)
         self.wall_timer(RESULT_PERIOD_S, self._drain_results)
+        self.create_timer(self.conf.Diagnostics.PERIOD_S.value, lambda: self.get_logger().debug(self._cache_summary or self._propagator.cache_summary()))
 
         self.add_param_callback(self._params.ENABLED.name, self._on_enabled)
         self.add_param_callback(self._listener_id.name, self._on_listener_selected)
@@ -231,13 +243,24 @@ class SoundPropagationNode(ArenaMixinNode):
         self._publish_registry()
 
     async def setup(self) -> None:
-        self._started = True
-        self._worker.start()
+        for index in range(self._params.PROCESSES.value):
+            tasks: Queue[bytes | None] = self._spawn.Queue()
+            process = self._spawn.Process(target=serve, args=(self._config, tasks, self._outcomes, self._now_ns, self._shared_generation), name=f"sound_propagation_{index}", daemon=True)
+            process.start()
+            self._children.append(_Child(process=process, tasks=tasks))
 
     def destroy_node(self) -> None:
-        self._stopping.set()
-        if self._worker.is_alive():
-            self._worker.join(timeout=WORKER_JOIN_TIMEOUT_S)
+        self._shared_generation.value = -1
+        for child in self._children:
+            if child.process.is_alive():
+                child.tasks.put(None)
+        deadline = time.monotonic() + PROCESS_JOIN_TIMEOUT_S
+        for child in self._children:
+            child.process.join(timeout=max(deadline - time.monotonic(), 0.0))
+            if child.process.is_alive():
+                child.process.terminate()
+                child.process.join()
+            child.tasks.cancel_join_thread()
         self._tracker.destroy()
         self._tf_listener.close()
         super().destroy_node()
@@ -468,83 +491,86 @@ class SoundPropagationNode(ArenaMixinNode):
         return position, source_msg, frame
 
     def _submit(self, job: _Job) -> None:
-        """Hands job to the worker once setup started it, else propagates it here."""
-        if self._started:
-            self._jobs.put(job)
-            return
-        try:
-            result = self._compute(job)
-        finally:
+        """Sends job to the least busy propagation process once setup started them, else propagates it here."""
+        if self._lost:
             self._in_flight.discard(job.source_id)
-        if result is not None:
-            self._apply(result)
-
-    def _propagate_forever(self) -> None:
-        """Worker loop that owns the propagator and computes every job off the executor thread."""
-        next_summary = time.monotonic() + self._summary_period_s
-        while not self._stopping.is_set():
+            return
+        task = Task(
+            job_id=next(self._job_ids),
+            emission=job.emission,
+            listeners=job.listeners,
+            config=job.config,
+            generation=job.generation,
+            stamp_ns=SimTime.from_msg(job.event_stamp).to_nanoseconds() if job.event_stamp is not None else 0,
+            max_age_ns=int(job.max_age_s * NS_PER_S) if math.isfinite(job.max_age_s) else 0,
+        )
+        if not self._children:
+            task = attrs.evolve(task, scene=job.scene if job.scene is not self._local_scene else None)
+            self._local_scene = job.scene
             try:
-                try:
-                    job = self._jobs.get(timeout=WORKER_POLL_S)
-                except queue.Empty:
-                    job = None
-                result = self._compute(job) if job is not None else None
-                if result is not None:
-                    self._results.put(result)
-                if time.monotonic() >= next_summary:
-                    next_summary = time.monotonic() + self._summary_period_s
-                    self.get_logger().debug(self._propagator.cache_summary())
-            except Exception:
-                if self._stopping.is_set():
-                    return
-                self.get_logger().error(f"propagation worker failed: {traceback.format_exc()}")
-                self.request_shutdown("propagation worker failed")
-                return
+                outcome = run(self._propagator, task, now_ns=self.sim_time.to_nanoseconds(), generation=self._generation, warnings=self._local_warnings)
+            finally:
+                self._in_flight.discard(job.source_id)
+            self._apply(job, outcome)
+            return
+        child = min(self._children, key=lambda candidate: candidate.outstanding)
+        task = attrs.evolve(task, scene=job.scene if job.scene is not child.sent_scene else None)
+        blob = pickle.dumps(task)
+        child.sent_scene = job.scene
+        child.outstanding += 1
+        self._sent[task.job_id] = (job, child)
+        self._share_state()
+        child.tasks.put(blob)
 
-    def _compute(self, job: _Job) -> _Result | None:
-        """Receptions of job, None for a sound event older than its buffer age."""
-        stamp_ns = SimTime.from_msg(job.event_stamp).to_nanoseconds() if job.event_stamp is not None else 0
-        if stamp_ns and self.sim_time.to_nanoseconds() - stamp_ns > job.max_age_s * NS_PER_S:
+    def _share_state(self) -> None:
+        self._now_ns.value = self.sim_time.to_nanoseconds()
+        self._shared_generation.value = self._generation
+
+    def _drain_results(self) -> None:
+        """Applies the outcomes of the propagation processes in submission order and shuts down when one of them exited."""
+        if not self._children or self._lost:
+            return
+        self._share_state()
+        while True:
+            try:
+                outcome: Outcome = pickle.loads(self._outcomes.get_nowait())
+            except queue.Empty:
+                break
+            self._done[outcome.job_id] = outcome
+            self._sent[outcome.job_id][1].outstanding -= 1
+        while self._sent and next(iter(self._sent)) in self._done:
+            job_id, (job, _) = self._sent.popitem(last=False)
+            self._apply(job, self._done.pop(job_id))
+        exited = [child.process for child in self._children if not child.process.is_alive()]
+        if exited:
+            self._lost = True
+            self.get_logger().error(f"propagation process {exited[0].name} exited with code {exited[0].exitcode}")
+            self.request_shutdown("propagation process lost")
+
+    def _apply(self, job: _Job, outcome: Outcome) -> None:
+        """Publishes the receptions of a job unless the world, episode, settings or listeners changed since it was built."""
+        self._in_flight.discard(job.source_id)
+        for message in outcome.warnings:
+            self.get_logger().warning(message)
+        if outcome.cache_summary:
+            self._cache_summary = outcome.cache_summary
+        if outcome.status is Status.STALE:
             self._stale_events += 1
             if self._warn_throttled(("events", "stale"), f"dropped {self._stale_events} sound events older than {job.max_age_s} s, propagation falls behind"):
                 self._stale_events = 0
-            return None
-        if self._propagator.config is not job.config:
-            self._propagator.config = job.config
-        if self._propagator.scene is not job.scene:
-            self._propagator.set_scene(job.scene)
-        receptions: list[tuple[Listener, Reception]] = []
-        for listener, reception in self._propagator.propagate_many(job.emission, job.listeners):
-            if self._stopping.is_set():
-                return None
-            receptions.append((listener, reception))
-            self._report_route(job.emission, listener, reception)
-            if reception.impulse is not None:
-                self._propagator.impulses.put(reception.impulse)
-        return _Result(job, tuple(receptions))
-
-    def _drain_results(self) -> None:
-        while True:
-            try:
-                result = self._results.get_nowait()
-            except queue.Empty:
-                return
-            self._apply(result)
-
-    def _apply(self, result: _Result) -> None:
-        """Publishes the receptions of a job unless the world, episode, settings or listeners changed since it was built."""
-        job = result.job
-        self._in_flight.discard(job.source_id)
-        if job.generation != self._generation:
             return
+        if outcome.status is Status.SKIPPED or job.generation != self._generation:
+            return
+        for listener, reception in outcome.receptions:
+            self._report_route(job.emission, listener, reception)
         if job.event_stamp is not None:
-            for _, reception in result.receptions:
+            for _, reception in outcome.receptions:
                 if reception.audible or self._params.INAUDIBLE_ENABLED.value:
                     self._publish_impulse(reception, job.event_stamp)
                     self._heard_pub.publish(reception.heard_msg(job.header, job.source_msg))
             return
         receptions = list(job.cached)
-        for listener, reception in result.receptions:
+        for listener, reception in outcome.receptions:
             self._continuous_cache[(job.source_id, listener.id)] = (job.signatures[listener.id], reception)
             receptions.append(reception)
         for reception in receptions:

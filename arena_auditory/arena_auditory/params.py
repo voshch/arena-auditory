@@ -121,6 +121,7 @@ class PropagationGroup(ParamGroup):
     BUFFER_ENABLED = Param[bool]("propagation.buffer.enabled", True, "Buffer emissions that arrive before their listener is known.")
     BUFFER_SIZE = Param[int]("propagation.buffer.size", 128, "Most emissions the buffer holds (0 = none).", constraint=Range(lo=0))
     BUFFER_MAX_AGE_S = Param[float]("propagation.buffer.max_age_s", 1.0, "Age in s after which a buffered emission is dropped.", constraint=Range(lo=0.0, lo_open=True))
+    PROCESSES = Param[int]("propagation.processes", 2, "Child processes that propagate in parallel, each taking the next pass when free.", constraint=Range(lo=1))
     PEDESTRIAN_LISTENERS_ENABLED = Param[bool]("pedestrian_listeners.enabled", False, "Pedestrians are propagation listeners and receive sound stimuli through the human simulator.")
     PEDESTRIAN_LISTENERS_DISCRETE_ENABLED = Param[bool]("pedestrian_listeners.discrete.enabled", False, "Publish discrete pedestrian sound stimuli.")
     PEDESTRIAN_EAR_HEIGHT_M = Param[float]("pedestrian_listeners.ear_height_m", 1.6, "Ear height in m of pedestrian listeners.", constraint=Range(lo=0.0))
